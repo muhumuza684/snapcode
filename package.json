@@ -1,0 +1,13 @@
+{
+  "name": "sandbox-ide-server",
+  "version": "0.1.0",
+  "description": "Tier 0/1 orchestrator for the unified sandbox IDE",
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js"
+  },
+  "dependencies": {
+    "dockerode": "^4.0.2",
+    "express": "^4.19.2"
+  }
+}
