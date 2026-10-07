@@ -1,0 +1,3195 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<title>Snapcode</title>
+<style>
+  :root {
+    --bg: #002C3E;      /* navy — page/header/editor background */
+    --panel: #002C3E;   /* navy — header panel */
+    --text: #F7F8F3;    /* off-white — primary text on dark surfaces */
+    --accent: #F7444E;  /* coral — primary action (Run button) */
+    --accent-2: #78BCC4;/* teal — secondary accents, borders, links */
+    --output-bg: #F7F8F3; /* off-white — output panel background */
+    --output-text: #002C3E; /* navy text on the light output panel */
+    --border: rgba(247, 248, 243, 0.14);
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font-family: -apple-system, "Segoe UI", sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    display: flex;
+    flex-direction: column;
+    height: 100vh;
+  }
+  header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 10px 16px;
+    background: var(--panel);
+    border-bottom: 1px solid var(--border);
+  }
+  header h1 { font-size: 15px; font-weight: 600; margin: 0; }
+  header .brand {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-end;
+    gap: 1px;
+    font-size: 11px;
+    color: var(--accent-2);
+  }
+  header .brand span:first-child { opacity: 1; }
+  header .brand span:last-child { opacity: 0.65; }
+  header .brand img { height: 16px; width: auto; display: block; }
+  /* (img rule kept for the watermark logo below, unused in header now) */
+  /* Subtle watermark inside the output panel — Monaco owns its own opaque
+     canvas layer on the left, so a plain CSS background here (not fixed over
+     the whole page) is the spot that actually stays visible and unobtrusive. */
+  #output-panel {
+    position: relative;
+  }
+  #output-panel::after {
+    content: "";
+    position: absolute;
+    bottom: 16px;
+    right: 18px;
+    width: 160px;
+    height: 42px;
+    background: url("assets/logo.png") no-repeat center / contain;
+    opacity: 0.07;
+    pointer-events: none;
+  }
+  .controls { display: flex; align-items: center; gap: 10px; }
+  select, button {
+    background: rgba(247, 248, 243, 0.06);
+    color: var(--text);
+    border: 1px solid var(--accent-2);
+    border-radius: 6px;
+    padding: 6px 12px;
+    font-size: 13px;
+    cursor: pointer;
+  }
+  button.run {
+    background: var(--accent);
+    color: var(--text);
+    border: none;
+    font-weight: 600;
+  }
+  button.run:disabled { opacity: 0.5; cursor: default; }
+
+  .modal-overlay {
+    display: none;
+    position: fixed;
+    top: 0; left: 0; width: 100%; height: 100%;
+    background: rgba(0, 0, 0, 0.5);
+    align-items: center;
+    justify-content: center;
+    z-index: 100;
+  }
+  .modal-overlay.show { display: flex; }
+  .modal-box {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    width: 420px;
+    max-height: 70vh;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+  }
+  .modal-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 12px 16px;
+    border-bottom: 1px solid var(--border);
+  }
+  .modal-header h3 { margin: 0; font-size: 15px; color: var(--text); }
+  .modal-header-actions { display: flex; align-items: center; gap: 10px; }
+  .modal-clear-all {
+    background: none;
+    border: none;
+    color: var(--text);
+    font-size: 11px;
+    opacity: 0.6;
+    cursor: pointer;
+    text-decoration: underline;
+    padding: 0;
+  }
+  .modal-clear-all:hover { opacity: 1; }
+  .modal-close {
+    background: none;
+    border: none;
+    color: var(--text);
+    font-size: 20px;
+    cursor: pointer;
+    line-height: 1;
+    opacity: 0.7;
+  }
+  .modal-close:hover { opacity: 1; }
+  .modal-body { overflow-y: auto; padding: 8px; }
+  .project-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 10px 12px;
+    border-radius: 6px;
+    cursor: pointer;
+    color: var(--text);
+    gap: 8px;
+  }
+  .project-row:hover { background: rgba(255, 255, 255, 0.06); }
+  .project-row .row-main { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+  .project-row .meta { font-size: 11px; opacity: 0.6; }
+  .project-row .delete-btn {
+    background: none;
+    border: none;
+    color: var(--text);
+    opacity: 0.45;
+    cursor: pointer;
+    font-size: 14px;
+    padding: 4px 6px;
+    border-radius: 4px;
+    flex-shrink: 0;
+  }
+  .project-row .delete-btn:hover { opacity: 1; background: rgba(244, 67, 54, 0.15); }
+  .project-empty { padding: 20px; text-align: center; opacity: 0.6; color: var(--text); font-size: 13px; }
+  main {
+    flex: 1;
+    display: flex;
+    min-height: 0;
+  }
+  #editor { flex: 1; min-width: 160px; }
+  #splitter {
+    width: 6px;
+    flex-shrink: 0;
+    cursor: col-resize;
+    background: var(--border);
+    position: relative;
+  }
+  #splitter:hover, #splitter.dragging {
+    background: var(--accent-2);
+  }
+  #splitter::after {
+    content: "";
+    position: absolute;
+    top: 0; bottom: 0;
+    left: -3px; right: -3px;
+  }
+  #output-panel {
+    width: 40%;
+    flex-shrink: 0;
+    min-width: 220px;
+    border-left: 1px solid var(--border);
+    display: flex;
+    flex-direction: column;
+    background: var(--output-bg);
+    color: var(--output-text);
+    overflow-y: auto;
+  }
+  #output-panel h2 {
+    font-size: 12px;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: var(--output-text);
+    opacity: 0.55;
+    margin: 0;
+    padding: 10px 14px;
+    border-bottom: 1px solid rgba(0, 44, 62, 0.12);
+  }
+  #output {
+    flex: 1;
+    overflow: auto;
+    padding: 12px 14px;
+    font-family: "SF Mono", Menlo, monospace;
+    font-size: 13px;
+    white-space: pre-wrap;
+    word-break: break-word;
+    color: var(--output-text);
+  }
+  #stdinInput {
+    margin: 0 14px 10px;
+    background: rgba(0, 44, 62, 0.04);
+    color: var(--output-text);
+    border: 1px solid rgba(0, 44, 62, 0.2);
+    border-radius: 4px;
+    font-family: "SF Mono", Menlo, monospace;
+    font-size: 12px;
+    padding: 8px 10px;
+    resize: vertical;
+    min-height: 40px;
+  }
+  #runMeta {
+    padding: 8px 14px;
+    font-size: 11px;
+    color: var(--output-text);
+    opacity: 0.6;
+    border-top: 1px solid rgba(0, 44, 62, 0.12);
+  }
+  .stderr { color: #B3232B; } /* darker coral — readable on the light output panel */
+  .note { color: var(--output-text); opacity: 0.55; font-size: 12px; margin-top: 10px; border-top: 1px solid rgba(0, 44, 62, 0.12); padding-top: 8px; }
+  footer {
+    text-align: center;
+    padding: 10px;
+    border-top: 1px solid var(--border);
+    background: var(--panel);
+  }
+  footer .line1 { color: var(--accent-2); font-size: 11px; }
+  footer .line2 { color: var(--accent-2); font-size: 11px; opacity: 0.65; margin-top: 2px; }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>Snapcode</h1>
+  <div class="controls">
+    <select id="language">
+      <option value="python">Python</option>
+      <option value="node">Node.js</option>
+      <option value="dart">Dart</option>
+      <option value="go">Go</option>
+      <option value="c">C</option>
+      <option value="cpp">C++</option>
+      <option value="typescript">TypeScript</option>
+      <option value="web">Web (HTML/CSS/JS)</option>
+    </select>
+    <select id="examples">
+      <option value="">Examples…</option>
+    </select>
+    <button class="run" id="runBtn">▶ Run</button>
+    <button id="saveBtn">💾 Save</button>
+    <button id="openBtn">📂 Open</button>
+    <button id="newBtn">📄 New</button>
+    <button id="importBtn">⬆ Import</button>
+    <input type="file" id="importFile" accept=".py,.js,.dart,.go,.c,.cpp,.ts,.html,.txt" multiple style="display:none;">
+  </div>
+</header>
+
+<div class="modal-overlay" id="projectsOverlay">
+  <div class="modal-box">
+    <div class="modal-header">
+      <h3>Open a saved project</h3>
+      <div class="modal-header-actions">
+        <button class="modal-clear-all" id="projectsClearAll">Clear all</button>
+        <button class="modal-close" id="projectsClose">&times;</button>
+      </div>
+    </div>
+    <div id="projectsList" class="modal-body">Loading…</div>
+  </div>
+</div>
+
+<main>
+  <div id="editor"></div>
+  <div id="splitter" title="Drag to resize"></div>
+  <div id="output-panel">
+    <h2>Stdin (optional input)</h2>
+    <textarea id="stdinInput" placeholder="Anything typed here is fed to the program's input()/readline() calls."></textarea>
+    <h2>Output</h2>
+    <div id="output">Run something to see output here.</div>
+    <div id="runMeta"></div>
+  </div>
+</main>
+
+<footer>
+  <div class="line1">Built in Uganda</div>
+  <div class="line2">Built by BrytMa Tech UG</div>
+</footer>
+
+<script src="https://unpkg.com/monaco-editor@0.48.0/min/vs/loader.js"></script>
+<script>
+  const DEFAULT_SNIPPETS = {
+    python: `print("hello from the sandbox")`,
+    node: `console.log("hello from the sandbox");`,
+    dart: `void main() {\n  print("hello from the sandbox");\n}`,
+    go: `package main\n\nimport "fmt"\n\nfunc main() {\n\tfmt.Println("hello from the sandbox")\n}`,
+    c: `#include <stdio.h>\n\nint main() {\n    printf("hello from the sandbox\\n");\n    return 0;\n}`,
+    cpp: `#include <iostream>\n\nint main() {\n    std::cout << "hello from the sandbox" << std::endl;\n    return 0;\n}`,
+    typescript: `const message: string = "hello from the sandbox";\nconsole.log(message);`,
+    web: `<!DOCTYPE html>\n<html>\n<head>\n  <style>\n    body { font-family: sans-serif; text-align: center; margin-top: 80px; }\n  </style>\n</head>\n<body>\n  <h1>Hello from the Web sandbox!</h1>\n</body>\n</html>`,
+  };
+
+  // TIER 6: a small example library so people discover what this can
+  // actually do (stdin, pre-installed packages, isolation) by picking from
+  // a dropdown instead of reading the README.
+  const EXAMPLES = {
+    python: {
+      "Hello world": `print("hello from the sandbox")`,
+      "Read stdin": `name = input("What's your name? ")\nprint(f"Hello, {name}!")`,
+      "Use a pre-installed package": `import requests\n# Network is off, so this will fail — that's the sandbox working as intended.\ntry:\n    requests.get("https://example.com", timeout=2)\nexcept Exception as e:\n    print(f"Blocked as expected: {e}")\n\nimport numpy as np\nprint("numpy array:", np.array([1, 2, 3]) * 2)`,
+      "Isolation check": `import os\nprint("Container root, not your machine:", os.listdir("/")[:5])`,
+      "Moving car": `html = """<!DOCTYPE html>
+<html><head><style>
+  body { margin:0; padding:0; background:#87CEEB; overflow:hidden; font-family:sans-serif; }
+  .sky { height:220px; display:flex; align-items:flex-end; justify-content:center; }
+  .sun { width:50px; height:50px; background:#FFD93D; border-radius:50%; margin-bottom:30px; }
+  .road { position:relative; width:100%; height:70px; background:#333; border-top:4px dashed #fff; }
+  .car { position:absolute; bottom:10px; left:-120px; font-size:50px; animation: drive 4s linear infinite; }
+  @keyframes drive { from { left:-120px; } to { left:110%; } }
+</style></head>
+<body>
+  <div class="sky"><div class="sun"></div></div>
+  <div class="road"><div class="car">&#128663;</div></div>
+</body></html>"""
+print(html)`,
+      "Blinking light bulb": `html = """<!DOCTYPE html>
+<html><head><style>
+  body { margin:0; height:100vh; display:flex; align-items:center; justify-content:center; background:#1a1a2e; }
+  .bulb { font-size:120px; animation: glow 1.2s ease-in-out infinite; }
+  @keyframes glow {
+    0%, 100% { filter: drop-shadow(0 0 5px #fff700) brightness(0.6); }
+    50% { filter: drop-shadow(0 0 40px #fff700) brightness(1.4); }
+  }
+</style></head>
+<body><div class="bulb">&#128161;</div></body></html>"""
+print(html)`,
+      "Fireworks": `html_parts = []
+html_parts.append("""<!DOCTYPE html>
+<html><head><style>
+  body { margin:0; background:#0a0a1a; overflow:hidden; }
+  canvas { display:block; }
+</style></head>
+<body>
+<canvas id="c"></canvas>
+""")
+html_parts.append("<" + "script>")
+html_parts.append("""
+var canvas = document.getElementById("c");
+var ctx = canvas.getContext("2d");
+canvas.width = window.innerWidth;
+canvas.height = 380;
+var particles = [];
+function explode(x, y) {
+  var hue = Math.floor(Math.random() * 360);
+  var color = "hsl(" + hue + ",100%,60%)";
+  for (var i = 0; i < 40; i++) {
+    var angle = (Math.PI * 2 * i) / 40;
+    var speed = 2 + Math.random() * 3;
+    particles.push({
+      x: x, y: y,
+      vx: Math.cos(angle) * speed,
+      vy: Math.sin(angle) * speed,
+      life: 60,
+      color: color
+    });
+  }
+}
+function tick() {
+  ctx.fillStyle = "rgba(10,10,26,0.2)";
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+  for (var i = 0; i < particles.length; i++) {
+    var p = particles[i];
+    p.x += p.vx;
+    p.y += p.vy;
+    p.vy += 0.03;
+    p.life -= 1;
+    ctx.fillStyle = p.color;
+    ctx.fillRect(p.x, p.y, 3, 3);
+  }
+  particles = particles.filter(function(p) { return p.life > 0; });
+  if (Math.random() < 0.05) {
+    explode(Math.random() * canvas.width, Math.random() * canvas.height * 0.6);
+  }
+  requestAnimationFrame(tick);
+}
+tick();
+""")
+html_parts.append("<" + "/script>")
+html_parts.append("</body></html>")
+html = "".join(html_parts)
+print(html)`,
+      "Login page": `html = """<!DOCTYPE html>
+<html><head><style>
+  body { margin:0; height:100vh; display:flex; align-items:center; justify-content:center;
+         background:linear-gradient(135deg,#667eea,#764ba2); font-family:sans-serif; }
+  .card { background:#fff; padding:32px; border-radius:12px; width:280px; box-shadow:0 10px 30px rgba(0,0,0,0.3); }
+  .card h2 { margin:0 0 20px; color:#333; text-align:center; }
+  .card input { width:100%; padding:10px; margin-bottom:12px; border:1px solid #ddd; border-radius:6px; box-sizing:border-box; }
+  .card button { width:100%; padding:10px; background:#667eea; color:#fff; border:none; border-radius:6px; font-weight:bold; cursor:pointer; }
+  .card button:hover { background:#5a67d8; }
+</style></head>
+<body>
+  <div class="card">
+    <h2>Welcome back</h2>
+    <input type="text" placeholder="Username">
+    <input type="password" placeholder="Password">
+    <button onclick="this.textContent='Signed in (demo only)'">Sign in</button>
+  </div>
+</body></html>"""
+print(html)`,
+      "Kampala skyline (day/night)": `html_parts = []
+html_parts.append("""<!DOCTYPE html>
+<html><head><style>
+  body { margin:0; height:100vh; overflow:hidden; position:relative;
+         background: linear-gradient(180deg, #ff9a56 0%, #ffd56b 40%, #4a6a8a 100%);
+         transition: background 4s; font-family:sans-serif; }
+  body.night { background: linear-gradient(180deg, #050314 0%, #0b1030 50%, #1a1a3a 100%); }
+  .skyline { position:absolute; bottom:0; width:100%; height:45%; display:flex; align-items:flex-end; }
+  .building { background:#2a2a3a; margin:0 2px; position:relative; }
+  .window { position:absolute; width:6px; height:6px; background:#ffd56b; opacity:0; transition:opacity 1s; }
+  body.night .window.lit { opacity:0.9; }
+  .sun { position:absolute; width:60px; height:60px; border-radius:50%; background:#fff6c7;
+         top:20%; left:50%; transition: top 4s, opacity 4s; box-shadow:0 0 40px #fff6c7; }
+  body.night .sun { opacity:0; top:-10%; }
+  .moon { position:absolute; width:40px; height:40px; border-radius:50%; background:#e8e8f0;
+          top:-10%; left:30%; opacity:0; transition: top 4s, opacity 4s; box-shadow:0 0 25px #e8e8f0; }
+  body.night .moon { opacity:0.9; top:15%; }
+  .label { position:absolute; top:12px; left:16px; color:#fff; font-size:18px; font-weight:bold;
+           text-shadow:0 2px 6px rgba(0,0,0,0.4); }
+</style></head>
+<body id="b">
+  <div class="label">Kampala</div>
+  <div class="sun"></div>
+  <div class="moon"></div>
+  <div class="skyline" id="skyline"></div>
+""")
+html_parts.append("<" + "script>")
+html_parts.append("""
+var skyline = document.getElementById("skyline");
+var heights = [60,120,80,150,100,180,90,130,70,160,110,95,140,75];
+for (var i = 0; i < heights.length; i++) {
+  var b = document.createElement("div");
+  b.className = "building";
+  b.style.width = "28px";
+  b.style.height = heights[i] + "px";
+  for (var w = 0; w < Math.floor(heights[i] / 20); w++) {
+    var win = document.createElement("div");
+    win.className = "window lit";
+    win.style.left = "6px";
+    win.style.bottom = (w * 20 + 6) + "px";
+    if (Math.random() < 0.3) win.classList.remove("lit");
+    b.appendChild(win);
+  }
+  skyline.appendChild(b);
+}
+var isNight = false;
+setInterval(function() {
+  isNight = !isNight;
+  document.getElementById("b").classList.toggle("night", isNight);
+}, 3000);
+""")
+html_parts.append("<" + "/script>")
+html_parts.append("</body></html>")
+print("".join(html_parts))
+`,
+      "Slithering snake": `html_parts = []
+html_parts.append("<!DOCTYPE html><html><head><title>Snake</title>")
+html_parts.append("<style>")
+html_parts.append("body{margin:0;background:#0b1e13;display:flex;align-items:center;justify-content:center;height:100vh;font-family:sans-serif;}")
+html_parts.append("#board{position:relative;width:400px;height:400px;background:#102418;border:3px solid #78BCC4;}")
+html_parts.append(".seg{position:absolute;width:18px;height:18px;background:#3ddc84;border-radius:4px;}")
+html_parts.append(".food{position:absolute;width:16px;height:16px;background:#F7444E;border-radius:50%;}")
+html_parts.append(".wrap{text-align:center;color:#F7F8F3;}")
+html_parts.append("</style></head><body><div class='wrap'><h2>Slithering Snake</h2><div id='board'></div><p id='score'>Score: 0</p></div>")
+html_parts.append("<" + "script>")
+html_parts.append("""
+const board = document.getElementById('board');
+let snake = [{x:5,y:5},{x:4,y:5},{x:3,y:5}];
+let dir = {x:1,y:0};
+let food = {x:12,y:8};
+let score = 0;
+const cell = 20;
+
+function randomFood(){
+  food = {x: Math.floor(Math.random()*20), y: Math.floor(Math.random()*20)};
+}
+
+function draw(){
+  board.innerHTML = '';
+  snake.forEach(s => {
+    const d = document.createElement('div');
+    d.className = 'seg';
+    d.style.left = (s.x*cell)+'px';
+    d.style.top = (s.y*cell)+'px';
+    board.appendChild(d);
+  });
+  const f = document.createElement('div');
+  f.className = 'food';
+  f.style.left = (food.x*cell+2)+'px';
+  f.style.top = (food.y*cell+2)+'px';
+  board.appendChild(f);
+}
+
+function step(){
+  const head = {x: snake[0].x + dir.x, y: snake[0].y + dir.y};
+  if (head.x < 0) head.x = 19;
+  if (head.x > 19) head.x = 0;
+  if (head.y < 0) head.y = 19;
+  if (head.y > 19) head.y = 0;
+  snake.unshift(head);
+  if (head.x === food.x && head.y === food.y){
+    score++;
+    document.getElementById('score').textContent = 'Score: ' + score;
+    randomFood();
+  } else {
+    snake.pop();
+  }
+  // simple AI: turn toward food occasionally
+  if (Math.random() < 0.3){
+    if (food.x > head.x) dir = {x:1,y:0};
+    else if (food.x < head.x) dir = {x:-1,y:0};
+    else if (food.y > head.y) dir = {x:0,y:1};
+    else if (food.y < head.y) dir = {x:0,y:-1};
+  }
+  draw();
+}
+draw();
+setInterval(step, 180);
+""")
+html_parts.append("<" + "/script>")
+html_parts.append("</body></html>")
+print("".join(html_parts))
+`,
+      "Rain storm with lightning": `html_parts = []
+html_parts.append("<!DOCTYPE html><html><head><title>Rain Storm</title>")
+html_parts.append("<style>")
+html_parts.append("body{margin:0;background:linear-gradient(#1a1a2e,#16213e);height:100vh;overflow:hidden;font-family:sans-serif;color:#F7F8F3;text-align:center;}")
+html_parts.append("h2{position:relative;z-index:2;padding-top:10px;}")
+html_parts.append(".drop{position:absolute;top:-20px;width:2px;height:16px;background:#78BCC4;opacity:0.7;}")
+html_parts.append(".flash{position:absolute;top:0;left:0;width:100%;height:100%;background:white;opacity:0;pointer-events:none;}")
+html_parts.append("</style></head><body><h2>Rain Storm Simulation</h2><div class='flash' id='flash'></div>")
+html_parts.append("<" + "script>")
+html_parts.append("""
+function makeDrop(){
+  const d = document.createElement('div');
+  d.className = 'drop';
+  d.style.left = Math.random()*100 + 'vw';
+  const duration = 0.6 + Math.random()*0.8;
+  d.style.transition = 'top ' + duration + 's linear';
+  document.body.appendChild(d);
+  requestAnimationFrame(() => { d.style.top = '110vh'; });
+  setTimeout(() => d.remove(), duration*1000 + 100);
+}
+setInterval(makeDrop, 40);
+
+function lightning(){
+  const flash = document.getElementById('flash');
+  flash.style.transition = 'none';
+  flash.style.opacity = 0.8;
+  setTimeout(() => {
+    flash.style.transition = 'opacity 0.4s';
+    flash.style.opacity = 0;
+  }, 80);
+  setTimeout(lightning, 3000 + Math.random()*4000);
+}
+setTimeout(lightning, 2000);
+""")
+html_parts.append("<" + "/script>")
+html_parts.append("</body></html>")
+print("".join(html_parts))
+`,
+      "Rocket launch countdown": `html_parts = []
+html_parts.append("<!DOCTYPE html><html><head><title>Rocket Launch</title>")
+html_parts.append("<style>")
+html_parts.append("body{margin:0;background:#000;height:100vh;overflow:hidden;font-family:sans-serif;color:#F7F8F3;text-align:center;}")
+html_parts.append("#pad{position:relative;width:100%;height:100%;}")
+html_parts.append("#rocket{position:absolute;bottom:40px;left:50%;transform:translateX(-50%);font-size:40px;transition:bottom 4s ease-in, transform 4s ease-in;}")
+html_parts.append("#status{position:relative;z-index:2;padding-top:10px;font-size:18px;}")
+html_parts.append(".star{position:absolute;width:2px;height:2px;background:#fff;border-radius:50%;}")
+html_parts.append("</style></head><body><div id='status'>T-minus countdown...</div><div id='pad'><div id='rocket'>🚀</div></div>")
+html_parts.append("<" + "script>")
+html_parts.append("""
+const pad = document.getElementById('pad');
+for (let i=0;i<80;i++){
+  const s = document.createElement('div');
+  s.className = 'star';
+  s.style.left = Math.random()*100 + '%';
+  s.style.top = Math.random()*90 + '%';
+  pad.appendChild(s);
+}
+const status = document.getElementById('status');
+const rocket = document.getElementById('rocket');
+let count = 5;
+const timer = setInterval(() => {
+  if (count > 0){
+    status.textContent = 'T-minus ' + count;
+    count--;
+  } else {
+    status.textContent = 'LIFTOFF!';
+    rocket.style.bottom = '100vh';
+    rocket.style.transform = 'translateX(-50%) rotate(-10deg)';
+    clearInterval(timer);
+    setTimeout(() => { status.textContent = 'Reached orbit. Mission successful.'; }, 4200);
+  }
+}, 900);
+""")
+html_parts.append("<" + "/script>")
+html_parts.append("</body></html>")
+print("".join(html_parts))
+`,
+      "Traffic light (input -> processing -> output)": `html_parts = []
+html_parts.append("<!DOCTYPE html><html><head><title>Traffic Intersection</title>")
+html_parts.append("<style>")
+html_parts.append("body{margin:0;background:#002C3E;height:100vh;font-family:sans-serif;color:#F7F8F3;text-align:center;}")
+html_parts.append(".lightbox{display:inline-block;background:#111;padding:10px;border-radius:8px;margin:20px;}")
+html_parts.append(".bulb{width:30px;height:30px;border-radius:50%;margin:6px auto;background:#333;}")
+html_parts.append(".on-red{background:#F7444E;}")
+html_parts.append(".on-yellow{background:#ffd23f;}")
+html_parts.append(".on-green{background:#3ddc84;}")
+html_parts.append("#log{max-width:500px;margin:0 auto;text-align:left;background:#00202c;padding:10px;border-radius:6px;font-size:13px;height:120px;overflow-y:auto;}")
+html_parts.append("</style></head><body><h2>Traffic Light Intersection</h2>")
+html_parts.append("<div class='lightbox'><div id='r' class='bulb'></div><div id='y' class='bulb'></div><div id='g' class='bulb'></div></div>")
+html_parts.append("<div id='log'></div>")
+html_parts.append("<" + "script>")
+html_parts.append("""
+const r = document.getElementById('r');
+const y = document.getElementById('y');
+const g = document.getElementById('g');
+const log = document.getElementById('log');
+
+function addLog(msg){
+  const line = document.createElement('div');
+  line.textContent = msg;
+  log.appendChild(line);
+  log.scrollTop = log.scrollHeight;
+}
+
+function clearAll(){
+  r.className = 'bulb'; y.className = 'bulb'; g.className = 'bulb';
+}
+
+// INPUT: sensor reports car waiting
+function sensorInput(){
+  return Math.random() < 0.5 ? 'car-detected' : 'no-car';
+}
+
+const sequence = [
+  {light:'g', cls:'on-green', dur:3000, label:'GREEN - go'},
+  {light:'y', cls:'on-yellow', dur:1200, label:'YELLOW - slow down'},
+  {light:'r', cls:'on-red', dur:2500, label:'RED - stop'},
+];
+let idx = 0;
+
+function cycle(){
+  clearAll();
+  const step = sequence[idx % sequence.length];
+  document.getElementById(step.light).className = 'bulb ' + step.cls;
+
+  // PROCESSING: decide based on sensor input when red
+  if (step.light === 'r'){
+    const sensed = sensorInput();
+    addLog('INPUT: sensor -> ' + sensed);
+    addLog('PROCESSING: ' + (sensed === 'car-detected' ? 'queue car, prepare green' : 'no action needed'));
+  }
+  addLog('OUTPUT: light = ' + step.label);
+
+  idx++;
+  setTimeout(cycle, step.dur);
+}
+cycle();
+""")
+html_parts.append("<" + "/script>")
+html_parts.append("</body></html>")
+print("".join(html_parts))
+`,
+      "Bouncing ball physics": `html_parts = []
+html_parts.append("<!DOCTYPE html><html><head><title>Bouncing Ball</title>")
+html_parts.append("<style>")
+html_parts.append("body{margin:0;background:#F7F8F3;height:100vh;overflow:hidden;}")
+html_parts.append("#ball{position:absolute;width:40px;height:40px;border-radius:50%;background:#F7444E;}")
+html_parts.append("#floor{position:absolute;bottom:0;width:100%;height:4px;background:#002C3E;}")
+html_parts.append("</style></head><body><div id='ball'></div><div id='floor'></div>")
+html_parts.append("<" + "script>")
+html_parts.append("""
+const ball = document.getElementById('ball');
+let x = 50, y = 20;
+let vx = 3.2, vy = 0;
+const gravity = 0.6;
+const bounce = 0.78;
+
+function tick(){
+  vy += gravity;
+  x += vx;
+  y += vy;
+
+  const maxY = window.innerHeight - 44;
+  const maxX = window.innerWidth - 40;
+
+  if (y > maxY){
+    y = maxY;
+    vy = -vy * bounce;
+  }
+  if (x > maxX || x < 0){
+    vx = -vx;
+    x = Math.max(0, Math.min(x, maxX));
+  }
+
+  ball.style.left = x + 'px';
+  ball.style.top = y + 'px';
+  requestAnimationFrame(tick);
+}
+tick();
+""")
+html_parts.append("<" + "/script>")
+html_parts.append("</body></html>")
+print("".join(html_parts))
+`,
+    },
+    node: {
+      "Hello world": `console.log("hello from the sandbox");`,
+      "Read stdin": `const readline = require("readline").createInterface({ input: process.stdin });\nreadline.question("What's your name? ", (name) => {\n  console.log(\`Hello, \${name}!\`);\n  readline.close();\n});`,
+      "Use a pre-installed package": `const _ = require("lodash");\nconsole.log("lodash chunk:", _.chunk([1, 2, 3, 4], 2));`,
+      "Fibonacci (memoized)": `function fibonacci(n, memo = {}) {
+  if (n in memo) return memo[n];
+  if (n <= 1) return n;
+  memo[n] = fibonacci(n - 1, memo) + fibonacci(n - 2, memo);
+  return memo[n];
+}
+
+console.log("Fibonacci sequence (memoized):");
+for (let i = 0; i <= 15; i++) {
+  console.log(\`fib(\${i}) = \${fibonacci(i)}\`);
+}
+`,
+      "Sieve of Eratosthenes": `function sieveOfEratosthenes(limit) {
+  const isPrime = new Array(limit + 1).fill(true);
+  isPrime[0] = isPrime[1] = false;
+  for (let i = 2; i * i <= limit; i++) {
+    if (isPrime[i]) {
+      for (let j = i * i; j <= limit; j += i) {
+        isPrime[j] = false;
+      }
+    }
+  }
+  return isPrime.reduce((primes, flag, num) => {
+    if (flag) primes.push(num);
+    return primes;
+  }, []);
+}
+
+const limit = 100;
+const primes = sieveOfEratosthenes(limit);
+console.log(\`Primes up to \${limit}:\`);
+console.log(primes.join(", "));
+console.log(\`Found \${primes.length} primes.\`);
+`,
+      "Sales data summary (reduce/filter)": `const sales = [
+  { product: "Widget", region: "East", amount: 120 },
+  { product: "Gadget", region: "West", amount: 85 },
+  { product: "Widget", region: "West", amount: 60 },
+  { product: "Gizmo", region: "East", amount: 200 },
+  { product: "Gadget", region: "East", amount: 95 },
+];
+
+const totalsByProduct = sales.reduce((acc, sale) => {
+  acc[sale.product] = (acc[sale.product] || 0) + sale.amount;
+  return acc;
+}, {});
+
+const eastSales = sales.filter((s) => s.region === "East");
+const grandTotal = sales.reduce((sum, s) => sum + s.amount, 0);
+const topProduct = Object.entries(totalsByProduct).sort((a, b) => b[1] - a[1])[0];
+
+console.log("Totals by product:", totalsByProduct);
+console.log("East region sales:", eastSales.map((s) => \`\${s.product}: $\${s.amount}\`));
+console.log(\`Grand total: $\${grandTotal}\`);
+console.log(\`Top product: \${topProduct[0]} ($\${topProduct[1]})\`);
+`,
+      "Async/await tasks": `function simulateTask(name, ms) {
+  return new Promise((resolve) => {
+    setTimeout(() => resolve(\`\${name} done after \${ms}ms\`), ms);
+  });
+}
+
+async function runTasks() {
+  console.log("Starting tasks...");
+
+  const sequential = await simulateTask("Task A", 50);
+  console.log("Sequential:", sequential);
+
+  const [b, c] = await Promise.all([
+    simulateTask("Task B", 30),
+    simulateTask("Task C", 20),
+  ]);
+  console.log("Parallel:", b, "|", c);
+
+  console.log("All tasks complete.");
+}
+
+runTasks();
+`,
+      "Shapes OOP (classes/inheritance)": `class Shape {
+  constructor(name) {
+    this.name = name;
+  }
+  area() {
+    throw new Error("area() must be implemented by subclass");
+  }
+  describe() {
+    return \`\${this.name}: area = \${this.area().toFixed(2)}\`;
+  }
+}
+
+class Circle extends Shape {
+  constructor(radius) {
+    super("Circle");
+    this.radius = radius;
+  }
+  area() {
+    return Math.PI * this.radius * this.radius;
+  }
+}
+
+class Rectangle extends Shape {
+  constructor(width, height) {
+    super("Rectangle");
+    this.width = width;
+    this.height = height;
+  }
+  area() {
+    return this.width * this.height;
+  }
+}
+
+const shapes = [new Circle(5), new Rectangle(4, 6), new Circle(2)];
+console.log("Shape areas:");
+shapes.forEach((s) => console.log(s.describe()));
+
+const totalArea = shapes.reduce((sum, s) => sum + s.area(), 0);
+console.log(\`Total area: \${totalArea.toFixed(2)}\`);
+`,
+      "Event emitter (pub/sub)": `const EventEmitter = require("events");
+
+class OrderSystem extends EventEmitter {
+  placeOrder(item, qty) {
+    console.log(\`Placing order: \${qty}x \${item}\`);
+    this.emit("orderPlaced", { item, qty });
+  }
+}
+
+const orders = new OrderSystem();
+
+orders.on("orderPlaced", (order) => {
+  console.log(\`[Inventory] Reserving \${order.qty} units of \${order.item}\`);
+});
+
+orders.on("orderPlaced", (order) => {
+  console.log(\`[Billing] Charging for \${order.qty}x \${order.item}\`);
+});
+
+orders.once("orderPlaced", () => {
+  console.log("[Analytics] First order received today!");
+});
+
+orders.placeOrder("Keyboard", 2);
+orders.placeOrder("Mouse", 1);
+`,
+      "JSON transform & rank": `const rawData = \`[
+  {"id": 1, "name": "Alice", "scores": [90, 85, 92]},
+  {"id": 2, "name": "Bob", "scores": [70, 75, 80]},
+  {"id": 3, "name": "Carol", "scores": [95, 98, 100]}
+]\`;
+
+const students = JSON.parse(rawData);
+
+const withAverages = students.map((s) => ({
+  name: s.name,
+  average: s.scores.reduce((a, b) => a + b, 0) / s.scores.length,
+}));
+
+withAverages.sort((a, b) => b.average - a.average);
+
+console.log("Student averages (ranked):");
+withAverages.forEach((s, i) => {
+  console.log(\`\${i + 1}. \${s.name}: \${s.average.toFixed(1)}\`);
+});
+
+const reshaped = JSON.stringify(withAverages, null, 2);
+console.log("\\nReshaped JSON output:");
+console.log(reshaped);
+`,
+    },
+    dart: {
+      "Hello world": `void main() {\n  print("hello from the sandbox");\n}`,
+      "Projectile motion": `import 'dart:math';
+
+void main() {
+  const double g = 9.8;
+  const double v0 = 30.0; // initial speed m/s
+  const double angleDeg = 45.0;
+  final double angleRad = angleDeg * pi / 180;
+
+  final double vx = v0 * cos(angleRad);
+  final double vy0 = v0 * sin(angleRad);
+
+  final double timeOfFlight = (2 * vy0) / g;
+  final double maxHeight = (vy0 * vy0) / (2 * g);
+  final double range = vx * timeOfFlight;
+
+  print('Projectile Motion Simulation');
+  print('Launch speed: \${v0.toStringAsFixed(1)} m/s at \${angleDeg.toStringAsFixed(0)} degrees');
+  print('---');
+
+  const int steps = 10;
+  for (int i = 0; i <= steps; i++) {
+    final double t = (timeOfFlight / steps) * i;
+    final double x = vx * t;
+    final double y = vy0 * t - 0.5 * g * t * t;
+    print('t=\${t.toStringAsFixed(2)}s  x=\${x.toStringAsFixed(2)}m  y=\${y.toStringAsFixed(2)}m');
+  }
+
+  print('---');
+  print('Max height: \${maxHeight.toStringAsFixed(2)} m');
+  print('Total range: \${range.toStringAsFixed(2)} m');
+  print('Time of flight: \${timeOfFlight.toStringAsFixed(2)} s');
+}
+`,
+      "Pendulum swing": `import 'dart:math';
+
+void main() {
+  const double g = 9.8;
+  const double length = 2.0; // meters
+  const double startAngleDeg = 30.0;
+  final double startAngleRad = startAngleDeg * pi / 180;
+
+  final double period = 2 * pi * sqrt(length / g);
+
+  print('Pendulum Swing Simulation');
+  print('Length: \${length.toStringAsFixed(1)} m, start angle: \${startAngleDeg.toStringAsFixed(0)} degrees');
+  print('Period (small-angle approx): \${period.toStringAsFixed(2)} s');
+  print('---');
+
+  const int steps = 12;
+  final double dt = period / steps;
+  for (int i = 0; i <= steps; i++) {
+    final double t = dt * i;
+    final double angle = startAngleRad * cos(sqrt(g / length) * t);
+    final double angleDeg = angle * 180 / pi;
+    final String bar = _buildBar(angleDeg);
+    print('t=\${t.toStringAsFixed(2)}s  angle=\${angleDeg.toStringAsFixed(1).padLeft(6)} deg  $bar');
+  }
+
+  print('---');
+  print('Simulation complete: pendulum settles back toward equilibrium over time with damping.');
+}
+
+String _buildBar(double angleDeg) {
+  final int pos = (angleDeg).round() + 30;
+  final int clamped = max(0, min(60, pos));
+  final StringBuffer sb = StringBuffer();
+  for (int i = 0; i < 61; i++) {
+    sb.write(i == clamped ? 'O' : (i == 30 ? '|' : '-'));
+  }
+  return sb.toString();
+}
+`,
+      "Fibonacci (iterative)": `int fibonacci(int n) {
+  if (n <= 1) return n;
+  int a = 0;
+  int b = 1;
+  for (int i = 2; i <= n; i++) {
+    final int next = a + b;
+    a = b;
+    b = next;
+  }
+  return b;
+}
+
+void main() {
+  print('Fibonacci sequence (iterative):');
+  for (int i = 0; i <= 15; i++) {
+    print('fib(\$i) = \${fibonacci(i)}');
+  }
+}
+`,
+      "Sieve of Eratosthenes": `List<int> sieveOfEratosthenes(int limit) {
+  final List<bool> isPrime = List<bool>.filled(limit + 1, true);
+  isPrime[0] = false;
+  if (limit >= 1) isPrime[1] = false;
+  for (int i = 2; i * i <= limit; i++) {
+    if (isPrime[i]) {
+      for (int j = i * i; j <= limit; j += i) {
+        isPrime[j] = false;
+      }
+    }
+  }
+  final List<int> primes = <int>[];
+  for (int i = 0; i <= limit; i++) {
+    if (isPrime[i]) primes.add(i);
+  }
+  return primes;
+}
+
+void main() {
+  const int limit = 100;
+  final List<int> primes = sieveOfEratosthenes(limit);
+  print('Primes up to \$limit:');
+  print(primes.join(', '));
+  print('Found \${primes.length} primes.');
+}
+`,
+      "Student grades (Map + sorting)": `void main() {
+  final Map<String, List<int>> scores = <String, List<int>>{
+    'Alice': <int>[90, 85, 92],
+    'Bob': <int>[70, 75, 80],
+    'Carol': <int>[95, 98, 100],
+  };
+
+  final Map<String, double> averages = <String, double>{};
+  scores.forEach((String name, List<int> list) {
+    final double avg = list.reduce((int a, int b) => a + b) / list.length;
+    averages[name] = avg;
+  });
+
+  final List<MapEntry<String, double>> ranked = averages.entries.toList()
+    ..sort((MapEntry<String, double> a, MapEntry<String, double> b) =>
+        b.value.compareTo(a.value));
+
+  print('Student averages (ranked):');
+  for (int i = 0; i < ranked.length; i++) {
+    final MapEntry<String, double> entry = ranked[i];
+    print('\${i + 1}. \${entry.key}: \${entry.value.toStringAsFixed(1)}');
+  }
+
+  final double classAverage =
+      averages.values.reduce((double a, double b) => a + b) / averages.length;
+  print('Class average: \${classAverage.toStringAsFixed(1)}');
+}
+`,
+      "Shapes OOP (abstract class/inheritance)": `abstract class Shape {
+  String get name;
+  double area();
+  String describe() => '\$name: area = \${area().toStringAsFixed(2)}';
+}
+
+class Circle extends Shape {
+  final double radius;
+  Circle(this.radius);
+
+  @override
+  String get name => 'Circle';
+
+  @override
+  double area() => 3.14159265358979 * radius * radius;
+}
+
+class Rectangle extends Shape {
+  final double width;
+  final double height;
+  Rectangle(this.width, this.height);
+
+  @override
+  String get name => 'Rectangle';
+
+  @override
+  double area() => width * height;
+}
+
+void main() {
+  final List<Shape> shapes = <Shape>[
+    Circle(5),
+    Rectangle(4, 6),
+    Circle(2),
+  ];
+
+  print('Shape areas:');
+  for (final Shape s in shapes) {
+    print(s.describe());
+  }
+
+  final double totalArea =
+      shapes.fold(0.0, (double sum, Shape s) => sum + s.area());
+  print('Total area: \${totalArea.toStringAsFixed(2)}');
+}
+`,
+      "Async/await tasks (Future)": `Future<String> simulateTask(String name, int ms) async {
+  await Future<void>.delayed(Duration(milliseconds: ms));
+  return '\$name done after \${ms}ms';
+}
+
+Future<void> runTasks() async {
+  print('Starting tasks...');
+
+  final String sequential = await simulateTask('Task A', 50);
+  print('Sequential: \$sequential');
+
+  final List<String> parallel = await Future.wait<String>(<Future<String>>[
+    simulateTask('Task B', 30),
+    simulateTask('Task C', 20),
+  ]);
+  print('Parallel: \${parallel.join(" | ")}');
+
+  print('All tasks complete.');
+}
+
+void main() async {
+  await runTasks();
+}
+`,
+      "Palindrome checker": `bool isPalindrome(String input) {
+  final String cleaned =
+      input.toLowerCase().replaceAll(RegExp(r'[^a-z0-9]'), '');
+  final String reversed = String.fromCharCodes(cleaned.runes.toList().reversed);
+  return cleaned == reversed;
+}
+
+void main() {
+  final List<String> candidates = <String>[
+    'racecar',
+    'A man a plan a canal Panama',
+    'hello world',
+    'Was it a car or a cat I saw?',
+  ];
+
+  print('Palindrome check:');
+  for (final String phrase in candidates) {
+    final bool result = isPalindrome(phrase);
+    print('"\$phrase" -> \${result ? "palindrome" : "not a palindrome"}');
+  }
+}
+`,
+      "Bubble sort": `void bubbleSort(List<int> list) {
+  final int n = list.length;
+  for (int i = 0; i < n - 1; i++) {
+    bool swapped = false;
+    for (int j = 0; j < n - i - 1; j++) {
+      if (list[j] > list[j + 1]) {
+        final int temp = list[j];
+        list[j] = list[j + 1];
+        list[j + 1] = temp;
+        swapped = true;
+      }
+    }
+    if (!swapped) break;
+  }
+}
+
+void main() {
+  final List<int> numbers = <int>[64, 34, 25, 12, 22, 11, 90];
+  print('Before: \$numbers');
+  bubbleSort(numbers);
+  print('After:  \$numbers');
+
+  final int smallest = numbers.first;
+  final int largest = numbers.last;
+  print('Smallest: \$smallest, Largest: \$largest');
+}
+`,
+    },
+    go: {
+      "Hello world": `package main\n\nimport "fmt"\n\nfunc main() {\n\tfmt.Println("hello from the sandbox")\n}`,
+      "Read stdin": `package main\n\nimport (\n\t"bufio"\n\t"fmt"\n\t"os"\n)\n\nfunc main() {\n\treader := bufio.NewReader(os.Stdin)\n\tfmt.Print("What's your name? ")\n\tname, _ := reader.ReadString('\\n')\n\tfmt.Printf("Hello, %s!\\n", name)\n}`,
+      "Traffic light controller (goroutines)": `package main
+
+import (
+	"fmt"
+	"sync"
+	"time"
+)
+
+type Light struct {
+	name string
+}
+
+func (l Light) run(cycles int, wg *sync.WaitGroup, mu *sync.Mutex) {
+	defer wg.Done()
+	states := []string{"RED", "GREEN", "YELLOW"}
+	for i := 0; i < cycles; i++ {
+		state := states[i%len(states)]
+		mu.Lock()
+		fmt.Printf("[%s] cycle %d -> %s\\n", l.name, i+1, state)
+		mu.Unlock()
+		time.Sleep(50 * time.Millisecond)
+	}
+}
+
+func main() {
+	fmt.Println("Starting intersection controller with 2 concurrent traffic lights...")
+	lights := []Light{{"North-South"}, {"East-West"}}
+	var wg sync.WaitGroup
+	var mu sync.Mutex
+
+	for _, l := range lights {
+		wg.Add(1)
+		go l.run(4, &wg, &mu)
+	}
+	wg.Wait()
+	fmt.Println("Controller shutdown: all lights stopped safely.")
+}
+`,
+      "Elevator state machine": `package main
+
+import "fmt"
+
+type State int
+
+const (
+	Idle State = iota
+	MovingUp
+	MovingDown
+	DoorsOpen
+)
+
+func (s State) String() string {
+	switch s {
+	case Idle:
+		return "IDLE"
+	case MovingUp:
+		return "MOVING UP"
+	case MovingDown:
+		return "MOVING DOWN"
+	case DoorsOpen:
+		return "DOORS OPEN"
+	}
+	return "UNKNOWN"
+}
+
+type Elevator struct {
+	floor int
+	state State
+}
+
+func (e *Elevator) requestFloor(target int) {
+	fmt.Printf("Request received: go to floor %d (currently on %d)\\n", target, e.floor)
+	if target == e.floor {
+		e.state = DoorsOpen
+		fmt.Printf("  -> already here. State: %s\\n", e.state)
+		return
+	}
+	if target > e.floor {
+		e.state = MovingUp
+	} else {
+		e.state = MovingDown
+	}
+	for e.floor != target {
+		if e.state == MovingUp {
+			e.floor++
+		} else {
+			e.floor--
+		}
+		fmt.Printf("  -> passing floor %d (%s)\\n", e.floor, e.state)
+	}
+	e.state = DoorsOpen
+	fmt.Printf("  -> arrived at floor %d. State: %s\\n", e.floor, e.state)
+	e.state = Idle
+}
+
+func main() {
+	e := &Elevator{floor: 0, state: Idle}
+	fmt.Println("Elevator system online. Starting at ground floor.")
+	e.requestFloor(5)
+	e.requestFloor(1)
+	e.requestFloor(1)
+	fmt.Println("Elevator idle. Ready for next request.")
+}
+`,
+    },
+    c: {
+      "Hello world": `#include <stdio.h>
+int main() {
+    printf("Hello from the sandbox!\\n");
+    return 0;
+}
+`,
+      "Fibonacci sequence": `#include <stdio.h>
+int main() {
+    int n = 12;
+    long a = 0, b = 1;
+    printf("First %d Fibonacci numbers:\\n", n);
+    for (int i = 0; i < n; i++) {
+        printf("%ld ", a);
+        long next = a + b;
+        a = b;
+        b = next;
+    }
+    printf("\\n");
+    return 0;
+}
+`,
+      "Prime number finder": `#include <stdio.h>
+int isPrime(int n) {
+    if (n < 2) return 0;
+    for (int i = 2; i * i <= n; i++) {
+        if (n % i == 0) return 0;
+    }
+    return 1;
+}
+int main() {
+    printf("Prime numbers up to 50:\\n");
+    for (int i = 2; i <= 50; i++) {
+        if (isPrime(i)) printf("%d ", i);
+    }
+    printf("\\n");
+    return 0;
+}
+`,
+      "Bubble sort (step by step)": `#include <stdio.h>
+void printArr(int arr[], int n) {
+    for (int i = 0; i < n; i++) printf("%d ", arr[i]);
+    printf("\\n");
+}
+int main() {
+    int arr[] = {64, 34, 25, 12, 22, 11, 90};
+    int n = sizeof(arr) / sizeof(arr[0]);
+    printf("Before: ");
+    printArr(arr, n);
+    for (int i = 0; i < n - 1; i++) {
+        for (int j = 0; j < n - i - 1; j++) {
+            if (arr[j] > arr[j + 1]) {
+                int tmp = arr[j];
+                arr[j] = arr[j + 1];
+                arr[j + 1] = tmp;
+            }
+        }
+        printf("Pass %d: ", i + 1);
+        printArr(arr, n);
+    }
+    printf("After:  ");
+    printArr(arr, n);
+    return 0;
+}
+`,
+      "Factorial (recursion)": `#include <stdio.h>
+long factorial(int n) {
+    if (n <= 1) return 1;
+    return n * factorial(n - 1);
+}
+int main() {
+    for (int i = 1; i <= 10; i++) {
+        printf("%d! = %ld\\n", i, factorial(i));
+    }
+    return 0;
+}
+`,
+      "Temperature converter": `#include <stdio.h>
+float toFahrenheit(float c) { return c * 9.0 / 5.0 + 32.0; }
+float toCelsius(float f) { return (f - 32.0) * 5.0 / 9.0; }
+int main() {
+    float celsiusValues[] = {0, 10, 20, 30, 37, 100};
+    printf("Celsius -> Fahrenheit\\n");
+    for (int i = 0; i < 6; i++) {
+        printf("%.1fC = %.1fF\\n", celsiusValues[i], toFahrenheit(celsiusValues[i]));
+    }
+    printf("\\nFahrenheit -> Celsius\\n");
+    float fahrenheitValues[] = {32, 50, 68, 98.6, 212};
+    for (int i = 0; i < 5; i++) {
+        printf("%.1fF = %.1fC\\n", fahrenheitValues[i], toCelsius(fahrenheitValues[i]));
+    }
+    return 0;
+}
+`,
+      "Simple calculator": `#include <stdio.h>
+double calculate(double a, double b, char op) {
+    switch (op) {
+        case '+': return a + b;
+        case '-': return a - b;
+        case '*': return a * b;
+        case '/': return b != 0 ? a / b : 0;
+        default: return 0;
+    }
+}
+int main() {
+    double a = 15, b = 4;
+    char ops[] = {'+', '-', '*', '/'};
+    printf("Simple calculator: a=%.1f, b=%.1f\\n", a, b);
+    for (int i = 0; i < 4; i++) {
+        printf("%.1f %c %.1f = %.2f\\n", a, ops[i], b, calculate(a, b, ops[i]));
+    }
+    return 0;
+}
+`,
+      "Array reversal": `#include <stdio.h>
+int main() {
+    int arr[] = {1, 2, 3, 4, 5, 6, 7, 8};
+    int n = sizeof(arr) / sizeof(arr[0]);
+    printf("Original: ");
+    for (int i = 0; i < n; i++) printf("%d ", arr[i]);
+    printf("\\n");
+    for (int i = 0; i < n / 2; i++) {
+        int tmp = arr[i];
+        arr[i] = arr[n - 1 - i];
+        arr[n - 1 - i] = tmp;
+    }
+    printf("Reversed: ");
+    for (int i = 0; i < n; i++) printf("%d ", arr[i]);
+    printf("\\n");
+    return 0;
+}
+`,
+      "Palindrome checker": `#include <stdio.h>
+#include <string.h>
+int isPalindrome(const char *s) {
+    int len = strlen(s);
+    for (int i = 0; i < len / 2; i++) {
+        if (s[i] != s[len - 1 - i]) return 0;
+    }
+    return 1;
+}
+int main() {
+    const char *words[] = {"radar", "hello", "level", "world", "madam"};
+    for (int i = 0; i < 5; i++) {
+        printf("%-8s -> %s\\n", words[i], isPalindrome(words[i]) ? "palindrome" : "not a palindrome");
+    }
+    return 0;
+}
+`,
+      "Matrix multiplication": `#include <stdio.h>
+#define N 3
+void printMatrix(int m[N][N]) {
+    for (int i = 0; i < N; i++) {
+        for (int j = 0; j < N; j++) printf("%4d", m[i][j]);
+        printf("\\n");
+    }
+}
+int main() {
+    int a[N][N] = {{1,2,3},{4,5,6},{7,8,9}};
+    int b[N][N] = {{9,8,7},{6,5,4},{3,2,1}};
+    int result[N][N] = {0};
+    for (int i = 0; i < N; i++)
+        for (int j = 0; j < N; j++)
+            for (int k = 0; k < N; k++)
+                result[i][j] += a[i][k] * b[k][j];
+    printf("Matrix A:\\n"); printMatrix(a);
+    printf("Matrix B:\\n"); printMatrix(b);
+    printf("A x B:\\n"); printMatrix(result);
+    return 0;
+}
+`,
+      "Linked list basics": `#include <stdio.h>
+#include <stdlib.h>
+typedef struct Node {
+    int data;
+    struct Node *next;
+} Node;
+Node* push(Node *head, int val) {
+    Node *n = malloc(sizeof(Node));
+    n->data = val;
+    n->next = head;
+    return n;
+}
+void printList(Node *head) {
+    while (head) {
+        printf("%d -> ", head->data);
+        head = head->next;
+    }
+    printf("NULL\\n");
+}
+void freeList(Node *head) {
+    while (head) {
+        Node *next = head->next;
+        free(head);
+        head = next;
+    }
+}
+int main() {
+    Node *head = NULL;
+    for (int i = 1; i <= 5; i++) head = push(head, i * 10);
+    printf("Linked list: ");
+    printList(head);
+    freeList(head);
+    return 0;
+}
+`,
+      "Binary search (step by step)": `#include <stdio.h>
+int binarySearch(int arr[], int n, int target) {
+    int lo = 0, hi = n - 1;
+    int steps = 0;
+    while (lo <= hi) {
+        steps++;
+        int mid = (lo + hi) / 2;
+        printf("  step %d: checking index %d (value %d)\\n", steps, mid, arr[mid]);
+        if (arr[mid] == target) {
+            printf("  found %d after %d steps\\n", target, steps);
+            return mid;
+        } else if (arr[mid] < target) {
+            lo = mid + 1;
+        } else {
+            hi = mid - 1;
+        }
+    }
+    printf("  not found after %d steps\\n", steps);
+    return -1;
+}
+int main() {
+    int arr[] = {2, 5, 8, 12, 16, 23, 38, 45, 56, 72, 91};
+    int n = sizeof(arr) / sizeof(arr[0]);
+    printf("Searching for 23 in a sorted array of %d elements:\\n", n);
+    binarySearch(arr, n, 23);
+    printf("\\nSearching for 99 (not present):\\n");
+    binarySearch(arr, n, 99);
+    return 0;
+}
+`,
+      "GCD and LCM": `#include <stdio.h>
+int gcd(int a, int b) {
+    while (b != 0) {
+        int t = b;
+        b = a % b;
+        a = t;
+    }
+    return a;
+}
+int main() {
+    int a = 48, b = 18;
+    int g = gcd(a, b);
+    int l = (a / g) * b;
+    printf("a = %d, b = %d\\n", a, b);
+    printf("GCD = %d\\n", g);
+    printf("LCM = %d\\n", l);
+    return 0;
+}
+`,
+      "Star pyramid pattern": `#include <stdio.h>
+int main() {
+    int rows = 6;
+    for (int i = 1; i <= rows; i++) {
+        for (int s = 0; s < rows - i; s++) printf(" ");
+        for (int j = 0; j < 2 * i - 1; j++) printf("*");
+        printf("\\n");
+    }
+    return 0;
+}
+`,
+      "Student grade report": `#include <stdio.h>
+typedef struct {
+    char name[30];
+    int score;
+} Student;
+int main() {
+    Student students[] = {
+        {"Alice", 88},
+        {"Brian", 72},
+        {"Cynthia", 95},
+        {"David", 60},
+    };
+    int n = 4;
+    float total = 0;
+    printf("Student report:\\n");
+    for (int i = 0; i < n; i++) {
+        const char *grade = students[i].score >= 80 ? "A" : students[i].score >= 70 ? "B" : students[i].score >= 60 ? "C" : "F";
+        printf("%-10s score=%3d grade=%s\\n", students[i].name, students[i].score, grade);
+        total += students[i].score;
+    }
+    printf("Class average: %.1f\\n", total / n);
+    return 0;
+}
+`,
+      "Pointers and swapping": `#include <stdio.h>
+void swap(int *a, int *b) {
+    int tmp = *a;
+    *a = *b;
+    *b = tmp;
+}
+int main() {
+    int x = 5, y = 10;
+    printf("Before swap: x=%d, y=%d\\n", x, y);
+    swap(&x, &y);
+    printf("After swap:  x=%d, y=%d\\n", x, y);
+
+    int arr[] = {10, 20, 30, 40, 50};
+    int *p = arr;
+    printf("\\nWalking an array via pointer arithmetic:\\n");
+    for (int i = 0; i < 5; i++) {
+        printf("*(p+%d) = %d (address offset %ld bytes)\\n", i, *(p + i), (char*)(p + i) - (char*)arr);
+    }
+    return 0;
+}
+`,
+      "Tower of Hanoi": `#include <stdio.h>
+int moves = 0;
+void hanoi(int n, char from, char to, char via) {
+    if (n == 0) return;
+    hanoi(n - 1, from, via, to);
+    moves++;
+    printf("Move disk %d from %c to %c\\n", n, from, to);
+    hanoi(n - 1, via, to, from);
+}
+int main() {
+    int disks = 4;
+    printf("Tower of Hanoi with %d disks:\\n", disks);
+    hanoi(disks, 'A', 'C', 'B');
+    printf("Total moves: %d (minimum possible: %d)\\n", moves, (1 << disks) - 1);
+    return 0;
+}
+`,
+      "Bitwise operations": `#include <stdio.h>
+int main() {
+    printf("Even/odd check using bitwise AND:\\n");
+    for (int i = 1; i <= 10; i++) {
+        printf("%2d is %s\\n", i, (i & 1) ? "odd" : "even");
+    }
+
+    int a = 7, b = 11;
+    printf("\\nSwap without a temp variable using XOR:\\n");
+    printf("Before: a=%d, b=%d\\n", a, b);
+    a = a ^ b;
+    b = a ^ b;
+    a = a ^ b;
+    printf("After:  a=%d, b=%d\\n", a, b);
+
+    printf("\\nSetting, clearing, and toggling a bit:\\n");
+    int flags = 0b0000;
+    flags |= (1 << 2);
+    printf("After set bit 2:    %d (binary pattern applied)\\n", flags);
+    flags &= ~(1 << 2);
+    printf("After clear bit 2:  %d\\n", flags);
+    flags ^= (1 << 1);
+    printf("After toggle bit 1: %d\\n", flags);
+    return 0;
+}
+`,
+      "String reversal": `#include <stdio.h>
+#include <string.h>
+void reverse(char *s) {
+    int len = strlen(s);
+    for (int i = 0; i < len / 2; i++) {
+        char tmp = s[i];
+        s[i] = s[len - 1 - i];
+        s[len - 1 - i] = tmp;
+    }
+}
+int main() {
+    char word[] = "sandbox";
+    printf("Original: %s\\n", word);
+    reverse(word);
+    printf("Reversed: %s\\n", word);
+
+    char sentence[] = "the quick brown fox";
+    printf("\\nReversing each word in: \\"%s\\"\\n", sentence);
+    char *tok = strtok(sentence, " ");
+    while (tok) {
+        reverse(tok);
+        printf("%s ", tok);
+        tok = strtok(NULL, " ");
+    }
+    printf("\\n");
+    return 0;
+}
+`,
+      "Bank account simulation": `#include <stdio.h>
+typedef struct {
+    char owner[30];
+    double balance;
+} Account;
+void deposit(Account *acc, double amount) {
+    acc->balance += amount;
+    printf("Deposited %.2f, new balance: %.2f\\n", amount, acc->balance);
+}
+int withdraw(Account *acc, double amount) {
+    if (amount > acc->balance) {
+        printf("Withdraw of %.2f failed: insufficient funds (balance %.2f)\\n", amount, acc->balance);
+        return 0;
+    }
+    acc->balance -= amount;
+    printf("Withdrew %.2f, new balance: %.2f\\n", amount, acc->balance);
+    return 1;
+}
+int main() {
+    Account acc = {"Jordan", 100.0};
+    printf("Account owner: %s, starting balance: %.2f\\n", acc.owner, acc.balance);
+    deposit(&acc, 50.0);
+    withdraw(&acc, 30.0);
+    withdraw(&acc, 500.0);
+    deposit(&acc, 20.0);
+    printf("Final balance: %.2f\\n", acc.balance);
+    return 0;
+}
+`,
+    },
+        cpp: {
+      "Hello world": `#include <iostream>
+
+int main() {
+    std::cout << "hello from the sandbox" << std::endl;
+    return 0;
+}
+`,
+      "Fibonacci sequence": `#include <iostream>
+#include <vector>
+
+int main() {
+    std::vector<long long> fib = {0, 1};
+    for (int i = 2; i <= 15; i++) {
+        fib.push_back(fib[i - 1] + fib[i - 2]);
+    }
+    std::cout << "Fibonacci sequence:" << std::endl;
+    for (int i = 0; i <= 15; i++) {
+        std::cout << "fib(" << i << ") = " << fib[i] << std::endl;
+    }
+    return 0;
+}
+`,
+      "Sieve of Eratosthenes": `#include <iostream>
+#include <vector>
+
+std::vector<int> sieveOfEratosthenes(int limit) {
+    std::vector<bool> isPrime(limit + 1, true);
+    isPrime[0] = isPrime[1] = false;
+    for (int i = 2; (long long)i * i <= limit; i++) {
+        if (isPrime[i]) {
+            for (int j = i * i; j <= limit; j += i) {
+                isPrime[j] = false;
+            }
+        }
+    }
+    std::vector<int> primes;
+    for (int i = 0; i <= limit; i++) {
+        if (isPrime[i]) primes.push_back(i);
+    }
+    return primes;
+}
+
+int main() {
+    int limit = 100;
+    std::vector<int> primes = sieveOfEratosthenes(limit);
+    std::cout << "Primes up to " << limit << ":" << std::endl;
+    for (size_t i = 0; i < primes.size(); i++) {
+        std::cout << primes[i];
+        if (i != primes.size() - 1) std::cout << ", ";
+    }
+    std::cout << std::endl;
+    std::cout << "Found " << primes.size() << " primes." << std::endl;
+    return 0;
+}
+`,
+      "Shapes OOP (virtual classes)": `#include <iostream>
+#include <vector>
+#include <memory>
+#include <iomanip>
+
+class Shape {
+public:
+    virtual double area() const = 0;
+    virtual std::string name() const = 0;
+    virtual ~Shape() = default;
+};
+
+class Circle : public Shape {
+    double radius;
+public:
+    Circle(double r) : radius(r) {}
+    double area() const override { return 3.14159265358979 * radius * radius; }
+    std::string name() const override { return "Circle"; }
+};
+
+class Rectangle : public Shape {
+    double width, height;
+public:
+    Rectangle(double w, double h) : width(w), height(h) {}
+    double area() const override { return width * height; }
+    std::string name() const override { return "Rectangle"; }
+};
+
+int main() {
+    std::vector<std::unique_ptr<Shape>> shapes;
+    shapes.push_back(std::make_unique<Circle>(5));
+    shapes.push_back(std::make_unique<Rectangle>(4, 6));
+    shapes.push_back(std::make_unique<Circle>(2));
+
+    std::cout << std::fixed << std::setprecision(2);
+    std::cout << "Shape areas:" << std::endl;
+    double total = 0;
+    for (const auto& s : shapes) {
+        std::cout << s->name() << ": area = " << s->area() << std::endl;
+        total += s->area();
+    }
+    std::cout << "Total area: " << total << std::endl;
+    return 0;
+}
+`,
+      "Bubble sort": `#include <iostream>
+#include <vector>
+
+void bubbleSort(std::vector<int>& arr) {
+    int n = arr.size();
+    for (int i = 0; i < n - 1; i++) {
+        bool swapped = false;
+        for (int j = 0; j < n - i - 1; j++) {
+            if (arr[j] > arr[j + 1]) {
+                std::swap(arr[j], arr[j + 1]);
+                swapped = true;
+            }
+        }
+        if (!swapped) break;
+    }
+}
+
+int main() {
+    std::vector<int> numbers = {64, 34, 25, 12, 22, 11, 90};
+
+    std::cout << "Before: ";
+    for (int n : numbers) std::cout << n << " ";
+    std::cout << std::endl;
+
+    bubbleSort(numbers);
+
+    std::cout << "After:  ";
+    for (int n : numbers) std::cout << n << " ";
+    std::cout << std::endl;
+
+    std::cout << "Smallest: " << numbers.front() << ", Largest: " << numbers.back() << std::endl;
+    return 0;
+}
+`,
+    },
+    typescript: {
+      "Hello world": `const message: string = "hello from the sandbox";
+console.log(message);
+`,
+      "Fibonacci (memoized)": `function fibonacci(n: number, memo: Record<number, number> = {}): number {
+  if (n in memo) return memo[n];
+  if (n <= 1) return n;
+  memo[n] = fibonacci(n - 1, memo) + fibonacci(n - 2, memo);
+  return memo[n];
+}
+
+console.log("Fibonacci sequence (memoized):");
+for (let i = 0; i <= 15; i++) {
+  console.log(\`fib(\${i}) = \${fibonacci(i)}\`);
+}
+`,
+      "Student averages (interfaces)": `interface Student {
+  name: string;
+  scores: number[];
+}
+
+function average(scores: number[]): number {
+  return scores.reduce((a, b) => a + b, 0) / scores.length;
+}
+
+const students: Student[] = [
+  { name: "Alice", scores: [90, 85, 92] },
+  { name: "Bob", scores: [70, 75, 80] },
+  { name: "Carol", scores: [95, 98, 100] },
+];
+
+const ranked = students
+  .map((s) => ({ name: s.name, avg: average(s.scores) }))
+  .sort((a, b) => b.avg - a.avg);
+
+console.log("Student averages (ranked):");
+ranked.forEach((s, i) => {
+  console.log(\`\${i + 1}. \${s.name}: \${s.avg.toFixed(1)}\`);
+});
+`,
+      "Generic Stack (classes)": `class Stack<T> {
+  private items: T[] = [];
+
+  push(item: T): void {
+    this.items.push(item);
+  }
+
+  pop(): T | undefined {
+    return this.items.pop();
+  }
+
+  peek(): T | undefined {
+    return this.items[this.items.length - 1];
+  }
+
+  get size(): number {
+    return this.items.length;
+  }
+}
+
+const stack = new Stack<number>();
+stack.push(1);
+stack.push(2);
+stack.push(3);
+
+console.log("Stack size:", stack.size);
+console.log("Peek:", stack.peek());
+console.log("Pop:", stack.pop());
+console.log("Pop:", stack.pop());
+console.log("Stack size after pops:", stack.size);
+`,
+      "Task summary (enums/types)": `enum Status {
+  Pending = "pending",
+  Active = "active",
+  Done = "done",
+}
+
+type Task = {
+  title: string;
+  status: Status;
+};
+
+const tasks: Task[] = [
+  { title: "Write report", status: Status.Done },
+  { title: "Review code", status: Status.Active },
+  { title: "Plan sprint", status: Status.Pending },
+];
+
+function summarize(tasks: Task[]): Record<Status, number> {
+  const counts: Record<Status, number> = {
+    [Status.Pending]: 0,
+    [Status.Active]: 0,
+    [Status.Done]: 0,
+  };
+  for (const t of tasks) {
+    counts[t.status]++;
+  }
+  return counts;
+}
+
+console.log("Tasks:");
+tasks.forEach((t) => console.log(\`- \${t.title} [\${t.status}]\`));
+
+const summary = summarize(tasks);
+console.log("\\nSummary:", summary);
+`,
+    },
+web: {
+      "Hello world": `<!DOCTYPE html>
+<html><head><style>
+  body { margin:0; height:100vh; display:flex; align-items:center; justify-content:center;
+         background:#002C3E; font-family:sans-serif; color:#F7F8F3; }
+  h1 { font-size:2.2em; }
+  span { color:#F7444E; }
+</style></head>
+<body>
+  <h1>Hello from the <span>Web</span> sandbox!</h1>
+</body></html>
+`,
+      "To-do list": `<!DOCTYPE html>
+<html><head><style>
+  body { margin:0; font-family:sans-serif; background:#F7F8F3; color:#002C3E; padding:20px; }
+  .wrap { max-width:360px; margin:0 auto; }
+  input { width:70%; padding:8px; border:1px solid #ccc; border-radius:6px; }
+  button { padding:8px 14px; background:#F7444E; color:#fff; border:none; border-radius:6px; cursor:pointer; }
+  ul { list-style:none; padding:0; }
+  li { display:flex; justify-content:space-between; align-items:center; padding:8px; background:#fff; margin:6px 0; border-radius:6px; box-shadow:0 1px 3px rgba(0,0,0,0.1); }
+  li.done span { text-decoration:line-through; color:#999; }
+  .del { background:#78BCC4; cursor:pointer; border:none; border-radius:4px; padding:4px 8px; color:#002C3E; }
+</style></head>
+<body>
+  <div class="wrap">
+    <h2>To-do list</h2>
+    <input id="input" placeholder="Add a task...">
+    <button id="add">Add</button>
+    <ul id="list"></ul>
+  </div>
+  <script>
+    const list = document.getElementById('list');
+    const input = document.getElementById('input');
+    let tasks = ['Write the demo', 'Test it', 'Ship it'];
+
+    function render() {
+      list.innerHTML = '';
+      tasks.forEach((t, i) => {
+        const li = document.createElement('li');
+        if (t.done) li.className = 'done';
+        const span = document.createElement('span');
+        span.textContent = t.text;
+        span.onclick = () => { t.done = !t.done; render(); };
+        const del = document.createElement('button');
+        del.className = 'del';
+        del.textContent = 'x';
+        del.onclick = () => { tasks.splice(i, 1); render(); };
+        li.appendChild(span);
+        li.appendChild(del);
+        list.appendChild(li);
+      });
+    }
+    tasks = tasks.map(t => ({ text: t, done: false }));
+
+    document.getElementById('add').onclick = () => {
+      if (input.value.trim()) {
+        tasks.push({ text: input.value.trim(), done: false });
+        input.value = '';
+        render();
+      }
+    };
+    input.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') document.getElementById('add').click();
+    });
+    render();
+  <\/script>
+</body></html>
+`,
+      "Counter (React)": `<!DOCTYPE html>
+<html><head><style>
+  body { margin:0; height:100vh; display:flex; align-items:center; justify-content:center;
+         background:#002C3E; font-family:sans-serif; color:#F7F8F3; }
+  .box { text-align:center; }
+  button { font-size:1.4em; width:50px; height:50px; margin:0 10px; border:none; border-radius:8px;
+           background:#F7444E; color:#fff; cursor:pointer; }
+  h1 { font-size:3em; margin:10px 0; }
+</style></head>
+<body>
+  <div id="root"></div>
+  <script crossorigin src="https://unpkg.com/react@18/umd/react.development.js"><\/script>
+  <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"><\/script>
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"><\/script>
+  <script type="text/babel">
+    function Counter() {
+      const [count, setCount] = React.useState(0);
+      return (
+        <div className="box">
+          <h1>{count}</h1>
+          <button onClick={() => setCount(count - 1)}>-</button>
+          <button onClick={() => setCount(count + 1)}>+</button>
+        </div>
+      );
+    }
+    const root = ReactDOM.createRoot(document.getElementById('root'));
+    root.render(<Counter />);
+  <\/script>
+</body></html>
+`,
+      "Color palette generator": `<!DOCTYPE html>
+<html><head><style>
+  body { margin:0; font-family:sans-serif; background:#002C3E; color:#F7F8F3; text-align:center; padding:20px; }
+  .swatches { display:flex; justify-content:center; gap:10px; margin-top:20px; flex-wrap:wrap; }
+  .swatch { width:90px; height:90px; border-radius:10px; display:flex; align-items:center; justify-content:center;
+            font-size:12px; font-weight:bold; cursor:pointer; box-shadow:0 2px 6px rgba(0,0,0,0.3); }
+  button { padding:10px 18px; background:#F7444E; color:#fff; border:none; border-radius:6px; cursor:pointer; font-size:1em; }
+</style></head>
+<body>
+  <h2>Color Palette Generator</h2>
+  <button id="gen">Generate new palette</button>
+  <div class="swatches" id="swatches"></div>
+  <p id="hint">Click a swatch to copy its hex code to the label below.</p>
+  <script>
+    function randomHex() {
+      return '#' + Math.floor(Math.random() * 0xffffff).toString(16).padStart(6, '0');
+    }
+    function contrastColor(hex) {
+      const r = parseInt(hex.substr(1, 2), 16);
+      const g = parseInt(hex.substr(3, 2), 16);
+      const b = parseInt(hex.substr(5, 2), 16);
+      const brightness = (r * 299 + g * 587 + b * 114) / 1000;
+      return brightness > 150 ? '#000' : '#fff';
+    }
+    function generate() {
+      const container = document.getElementById('swatches');
+      container.innerHTML = '';
+      for (let i = 0; i < 5; i++) {
+        const hex = randomHex();
+        const div = document.createElement('div');
+        div.className = 'swatch';
+        div.style.background = hex;
+        div.style.color = contrastColor(hex);
+        div.textContent = hex;
+        div.onclick = () => { document.getElementById('hint').textContent = 'Selected: ' + hex; };
+        container.appendChild(div);
+      }
+    }
+    document.getElementById('gen').onclick = generate;
+    generate();
+  <\/script>
+</body></html>
+`,
+      "Calculator UI": `<!DOCTYPE html>
+<html><head><style>
+  body { margin:0; height:100vh; display:flex; align-items:center; justify-content:center;
+         background:#002C3E; font-family:sans-serif; }
+  .calc { background:#001a26; border-radius:12px; padding:14px; width:240px; }
+  #display { width:100%; box-sizing:border-box; font-size:1.6em; padding:10px; margin-bottom:10px;
+              border:none; border-radius:6px; text-align:right; background:#F7F8F3; color:#002C3E; }
+  .grid { display:grid; grid-template-columns:repeat(4, 1fr); gap:8px; }
+  button { padding:14px 0; font-size:1.1em; border:none; border-radius:6px; cursor:pointer; background:#78BCC4; color:#002C3E; }
+  button.op { background:#F7444E; color:#fff; }
+  button.eq { background:#3ddc84; color:#002C3E; grid-column: span 2; }
+</style></head>
+<body>
+  <div class="calc">
+    <input id="display" readonly value="0">
+    <div class="grid" id="keys"></div>
+  </div>
+  <script>
+    const display = document.getElementById('display');
+    const keys = document.getElementById('keys');
+    let expr = '';
+    const layout = ['7','8','9','/','4','5','6','*','1','2','3','-','0','.','C','+','='];
+    layout.forEach(k => {
+      const btn = document.createElement('button');
+      btn.textContent = k;
+      if ('/*-+'.includes(k)) btn.className = 'op';
+      if (k === '=') btn.className = 'eq';
+      btn.onclick = () => {
+        if (k === 'C') { expr = ''; }
+        else if (k === '=') {
+          try {
+            // Only digits and basic operators ever reach eval here.
+            expr = String(Function('"use strict"; return (' + expr + ')')());
+          } catch (e) { expr = 'Error'; }
+        } else {
+          expr += k;
+        }
+        display.value = expr || '0';
+      };
+      keys.appendChild(btn);
+    });
+  <\/script>
+</body></html>
+`,
+      "Digital clock": `<!DOCTYPE html>
+<html><head><style>
+  body { margin:0; height:100vh; display:flex; align-items:center; justify-content:center;
+         background:#002C3E; font-family:'Courier New', monospace; }
+  #clock { font-size:4em; color:#78BCC4; letter-spacing:4px; }
+  #date { text-align:center; color:#F7F8F3; font-family:sans-serif; margin-top:10px; }
+</style></head>
+<body>
+  <div>
+    <div id="clock">--:--:--</div>
+    <div id="date"></div>
+  </div>
+  <script>
+    function pad(n) { return n.toString().padStart(2, '0'); }
+    function tick() {
+      const now = new Date();
+      document.getElementById('clock').textContent =
+        pad(now.getHours()) + ':' + pad(now.getMinutes()) + ':' + pad(now.getSeconds());
+      document.getElementById('date').textContent =
+        now.toDateString();
+    }
+    tick();
+    setInterval(tick, 1000);
+  <\/script>
+</body></html>
+`,
+      "Stopwatch": `<!DOCTYPE html>
+<html><head><style>
+  body { margin:0; height:100vh; display:flex; align-items:center; justify-content:center;
+         background:#F7F8F3; font-family:sans-serif; }
+  .box { text-align:center; }
+  #time { font-size:3em; color:#002C3E; font-family:monospace; }
+  button { padding:10px 20px; margin:4px; border:none; border-radius:6px; cursor:pointer; color:#fff; font-size:1em; }
+  #startBtn { background:#3ddc84; }
+  #stopBtn { background:#F7444E; }
+  #resetBtn { background:#78BCC4; color:#002C3E; }
+</style></head>
+<body>
+  <div class="box">
+    <div id="time">00:00.0</div>
+    <button id="startBtn">Start</button>
+    <button id="stopBtn">Stop</button>
+    <button id="resetBtn">Reset</button>
+  </div>
+  <script>
+    let elapsedMs = 0;
+    let running = false;
+    let lastTick = null;
+    let intervalId = null;
+
+    function render() {
+      const totalSeconds = elapsedMs / 1000;
+      const mins = Math.floor(totalSeconds / 60);
+      const secs = Math.floor(totalSeconds % 60);
+      const tenths = Math.floor((elapsedMs % 1000) / 100);
+      document.getElementById('time').textContent =
+        String(mins).padStart(2, '0') + ':' + String(secs).padStart(2, '0') + '.' + tenths;
+    }
+
+    document.getElementById('startBtn').onclick = () => {
+      if (running) return;
+      running = true;
+      lastTick = Date.now();
+      intervalId = setInterval(() => {
+        const now = Date.now();
+        elapsedMs += now - lastTick;
+        lastTick = now;
+        render();
+      }, 100);
+    };
+    document.getElementById('stopBtn').onclick = () => {
+      running = false;
+      clearInterval(intervalId);
+    };
+    document.getElementById('resetBtn').onclick = () => {
+      running = false;
+      clearInterval(intervalId);
+      elapsedMs = 0;
+      render();
+    };
+    render();
+  <\/script>
+</body></html>
+`,
+      "Form validation": `<!DOCTYPE html>
+<html><head><style>
+  body { margin:0; font-family:sans-serif; background:#002C3E; color:#F7F8F3; display:flex;
+         align-items:center; justify-content:center; height:100vh; }
+  form { background:#001a26; padding:24px; border-radius:10px; width:280px; }
+  label { display:block; margin-top:12px; font-size:0.9em; }
+  input { width:100%; box-sizing:border-box; padding:8px; margin-top:4px; border-radius:6px; border:1px solid #444; }
+  .error { color:#F7444E; font-size:0.8em; min-height:16px; }
+  button { margin-top:16px; width:100%; padding:10px; background:#3ddc84; border:none; border-radius:6px; cursor:pointer; font-weight:bold; }
+  #result { margin-top:10px; color:#78BCC4; font-size:0.9em; }
+</style></head>
+<body>
+  <form id="form">
+    <h2>Sign up</h2>
+    <label>Email</label>
+    <input id="email" type="text">
+    <div class="error" id="emailErr"></div>
+    <label>Password (min 8 chars)</label>
+    <input id="password" type="password">
+    <div class="error" id="passErr"></div>
+    <button type="submit">Create account</button>
+    <div id="result"></div>
+  </form>
+  <script>
+    document.getElementById('form').addEventListener('submit', (e) => {
+      e.preventDefault();
+      const email = document.getElementById('email').value.trim();
+      const pass = document.getElementById('password').value;
+      let valid = true;
+
+      const emailOk = /^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$/.test(email);
+      document.getElementById('emailErr').textContent = emailOk ? '' : 'Enter a valid email address';
+      if (!emailOk) valid = false;
+
+      const passOk = pass.length >= 8;
+      document.getElementById('passErr').textContent = passOk ? '' : 'Password must be at least 8 characters';
+      if (!passOk) valid = false;
+
+      document.getElementById('result').textContent = valid ? 'Form is valid — account would be created.' : '';
+    });
+  <\/script>
+</body></html>
+`,
+      "Dark/light theme toggle": `<!DOCTYPE html>
+<html><head><style>
+  body { margin:0; height:100vh; display:flex; align-items:center; justify-content:center;
+         font-family:sans-serif; transition: background 0.4s, color 0.4s; }
+  body.light { background:#F7F8F3; color:#002C3E; }
+  body.dark { background:#002C3E; color:#F7F8F3; }
+  .card { text-align:center; padding:30px; border-radius:12px; box-shadow:0 4px 20px rgba(0,0,0,0.2); }
+  body.light .card { background:#fff; }
+  body.dark .card { background:#001a26; }
+  button { margin-top:16px; padding:10px 20px; border:none; border-radius:20px; cursor:pointer;
+            background:#F7444E; color:#fff; font-size:1em; }
+</style></head>
+<body class="light">
+  <div class="card">
+    <h2 id="label">Light mode</h2>
+    <p>Click below to switch themes.</p>
+    <button id="toggle">Toggle theme</button>
+  </div>
+  <script>
+    const body = document.body;
+    const label = document.getElementById('label');
+    document.getElementById('toggle').onclick = () => {
+      const isLight = body.classList.contains('light');
+      body.classList.toggle('light', !isLight);
+      body.classList.toggle('dark', isLight);
+      label.textContent = isLight ? 'Dark mode' : 'Light mode';
+    };
+  <\/script>
+</body></html>
+`,
+      "FAQ accordion": `<!DOCTYPE html>
+<html><head><style>
+  body { margin:0; font-family:sans-serif; background:#F7F8F3; color:#002C3E; padding:30px; }
+  .acc { max-width:420px; margin:0 auto; }
+  .item { border-bottom:1px solid #ddd; }
+  .q { padding:14px 0; cursor:pointer; font-weight:bold; display:flex; justify-content:space-between; }
+  .a { max-height:0; overflow:hidden; transition:max-height 0.3s ease; color:#555; font-size:0.9em; }
+  .item.open .a { max-height:200px; padding-bottom:12px; }
+  .arrow { transition:transform 0.3s; }
+  .item.open .arrow { transform:rotate(180deg); }
+</style></head>
+<body>
+  <div class="acc" id="acc">
+    <h2>FAQ</h2>
+  </div>
+  <script>
+    const faqs = [
+      { q: 'What is the sandbox?', a: 'A self-hosted environment for running code safely in isolated containers.' },
+      { q: 'Is my code stored?', a: 'Only if you explicitly save it — each run starts with a fresh container.' },
+      { q: 'What languages are supported?', a: 'Python, Node.js, Go, Dart, C, and web (HTML/CSS/JS).' },
+    ];
+    const acc = document.getElementById('acc');
+    faqs.forEach(f => {
+      const item = document.createElement('div');
+      item.className = 'item';
+      const q = document.createElement('div');
+      q.className = 'q';
+      q.innerHTML = '<span>' + f.q + '</span><span class="arrow">v</span>';
+      const a = document.createElement('div');
+      a.className = 'a';
+      a.textContent = f.a;
+      q.onclick = () => item.classList.toggle('open');
+      item.appendChild(q);
+      item.appendChild(a);
+      acc.appendChild(item);
+    });
+  <\/script>
+</body></html>
+`,
+      "Tabs component": `<!DOCTYPE html>
+<html><head><style>
+  body { margin:0; font-family:sans-serif; background:#002C3E; color:#F7F8F3; padding:30px; }
+  .tabs { display:flex; gap:6px; max-width:420px; margin:0 auto; }
+  .tab { padding:10px 16px; background:#001a26; cursor:pointer; border-radius:6px 6px 0 0; }
+  .tab.active { background:#78BCC4; color:#002C3E; font-weight:bold; }
+  .panel { max-width:420px; margin:0 auto; background:#001a26; padding:16px; border-radius:0 6px 6px 6px; min-height:80px; }
+  .panel-content { display:none; }
+  .panel-content.active { display:block; }
+</style></head>
+<body>
+  <div class="tabs" id="tabs"></div>
+  <div class="panel" id="panel"></div>
+  <script>
+    const data = [
+      { label: 'Overview', content: 'The sandbox runs isolated code in fresh containers every time.' },
+      { label: 'Security', content: 'No network access, memory and CPU limits, and automatic timeouts.' },
+      { label: 'Languages', content: 'Python, Node.js, Go, Dart, C, and client-side web examples.' },
+    ];
+    const tabsEl = document.getElementById('tabs');
+    const panelEl = document.getElementById('panel');
+
+    data.forEach((d, i) => {
+      const tab = document.createElement('div');
+      tab.className = 'tab' + (i === 0 ? ' active' : '');
+      tab.textContent = d.label;
+      tab.onclick = () => selectTab(i);
+      tabsEl.appendChild(tab);
+
+      const content = document.createElement('div');
+      content.className = 'panel-content' + (i === 0 ? ' active' : '');
+      content.textContent = d.content;
+      panelEl.appendChild(content);
+    });
+
+    function selectTab(idx) {
+      [...tabsEl.children].forEach((t, i) => t.classList.toggle('active', i === idx));
+      [...panelEl.children].forEach((p, i) => p.classList.toggle('active', i === idx));
+    }
+  <\/script>
+</body></html>
+`,
+      "Image carousel": `<!DOCTYPE html>
+<html><head><style>
+  body { margin:0; height:100vh; display:flex; align-items:center; justify-content:center;
+         background:#002C3E; font-family:sans-serif; }
+  .carousel { position:relative; width:360px; height:220px; overflow:hidden; border-radius:12px; }
+  .slide { position:absolute; top:0; left:0; width:100%; height:100%; display:flex; align-items:center;
+           justify-content:center; font-size:2.5em; color:#fff; transition:transform 0.5s ease; }
+  .dots { position:absolute; bottom:10px; left:50%; transform:translateX(-50%); display:flex; gap:6px; }
+  .dot { width:8px; height:8px; border-radius:50%; background:rgba(255,255,255,0.5); cursor:pointer; }
+  .dot.active { background:#fff; }
+  .nav { position:absolute; top:50%; transform:translateY(-50%); background:rgba(0,0,0,0.4); color:#fff;
+         border:none; width:34px; height:34px; border-radius:50%; cursor:pointer; font-size:1.2em; }
+  .prev { left:10px; } .next { right:10px; }
+</style></head>
+<body>
+  <div class="carousel" id="carousel">
+    <button class="nav prev" id="prevBtn">&#8249;</button>
+    <button class="nav next" id="nextBtn">&#8250;</button>
+    <div class="dots" id="dots"></div>
+  </div>
+  <script>
+    const colors = ['#F7444E', '#78BCC4', '#3ddc84', '#ffd23f'];
+    const emojis = ['🏔️', '🌊', '🌲', '🌅'];
+    let current = 0;
+    const carousel = document.getElementById('carousel');
+
+    const slides = colors.map((c, i) => {
+      const s = document.createElement('div');
+      s.className = 'slide';
+      s.style.background = c;
+      s.textContent = emojis[i];
+      carousel.insertBefore(s, document.getElementById('dots'));
+      return s;
+    });
+
+    const dots = colors.map((_, i) => {
+      const d = document.createElement('div');
+      d.className = 'dot' + (i === 0 ? ' active' : '');
+      d.onclick = () => goTo(i);
+      document.getElementById('dots').appendChild(d);
+      return d;
+    });
+
+    function render() {
+      slides.forEach((s, i) => { s.style.display = i === current ? 'flex' : 'none'; });
+      dots.forEach((d, i) => d.classList.toggle('active', i === current));
+    }
+    function goTo(i) { current = (i + colors.length) % colors.length; render(); }
+
+    document.getElementById('prevBtn').onclick = () => goTo(current - 1);
+    document.getElementById('nextBtn').onclick = () => goTo(current + 1);
+    render();
+    setInterval(() => goTo(current + 1), 3000);
+  <\/script>
+</body></html>
+`,
+      "Weather card": `<!DOCTYPE html>
+<html><head><style>
+  body { margin:0; height:100vh; display:flex; align-items:center; justify-content:center;
+         background:linear-gradient(135deg,#78BCC4,#002C3E); font-family:sans-serif; }
+  .card { background:rgba(255,255,255,0.12); backdrop-filter:blur(8px); border-radius:16px;
+          padding:30px; width:260px; color:#fff; text-align:center; }
+  .icon { font-size:4em; }
+  .temp { font-size:3em; margin:10px 0; }
+  .city { font-size:1.2em; opacity:0.9; }
+  .row { display:flex; justify-content:space-between; margin-top:16px; font-size:0.85em; opacity:0.85; }
+  select { margin-top:10px; padding:4px; border-radius:6px; }
+</style></head>
+<body>
+  <div class="card">
+    <div class="city" id="city">Kampala</div>
+    <div class="icon" id="icon">⛅</div>
+    <div class="temp" id="temp">26°C</div>
+    <div class="row"><span id="humidity">Humidity: 68%</span></div>
+    <div class="row"><span id="wind">Wind: 12 km/h</span></div>
+    <select id="citySelect">
+      <option value="0">Kampala</option>
+      <option value="1">Nairobi</option>
+      <option value="2">Lagos</option>
+    </select>
+  </div>
+  <script>
+    const data = [
+      { city: 'Kampala', icon: '⛅', temp: '26°C', humidity: 68, wind: 12 },
+      { city: 'Nairobi', icon: '☀️', temp: '22°C', humidity: 45, wind: 18 },
+      { city: 'Lagos', icon: '🌧️', temp: '29°C', humidity: 81, wind: 9 },
+    ];
+    document.getElementById('citySelect').onchange = (e) => {
+      const d = data[+e.target.value];
+      document.getElementById('city').textContent = d.city;
+      document.getElementById('icon').textContent = d.icon;
+      document.getElementById('temp').textContent = d.temp;
+      document.getElementById('humidity').textContent = 'Humidity: ' + d.humidity + '%';
+      document.getElementById('wind').textContent = 'Wind: ' + d.wind + ' km/h';
+    };
+  <\/script>
+</body></html>
+`,
+      "Random quote generator": `<!DOCTYPE html>
+<html><head><style>
+  body { margin:0; height:100vh; display:flex; align-items:center; justify-content:center;
+         background:#F7F8F3; font-family:sans-serif; }
+  .card { max-width:420px; text-align:center; padding:30px; }
+  blockquote { font-size:1.4em; color:#002C3E; margin:0 0 10px; font-style:italic; }
+  cite { color:#78BCC4; font-weight:bold; }
+  button { margin-top:20px; padding:10px 20px; background:#F7444E; color:#fff; border:none;
+           border-radius:20px; cursor:pointer; }
+</style></head>
+<body>
+  <div class="card">
+    <blockquote id="quote"></blockquote>
+    <cite id="author"></cite>
+    <br>
+    <button id="next">New quote</button>
+  </div>
+  <script>
+    const quotes = [
+      { text: 'Code is read more often than it is written.', author: 'Guido van Rossum' },
+      { text: 'Simplicity is the soul of efficiency.', author: 'Austin Freeman' },
+      { text: 'First, solve the problem. Then, write the code.', author: 'John Johnson' },
+      { text: 'Make it work, make it right, make it fast.', author: 'Kent Beck' },
+      { text: 'The best error message is the one that never shows up.', author: 'Thomas Fuchs' },
+    ];
+    function show() {
+      const q = quotes[Math.floor(Math.random() * quotes.length)];
+      document.getElementById('quote').textContent = '"' + q.text + '"';
+      document.getElementById('author').textContent = '— ' + q.author;
+    }
+    document.getElementById('next').onclick = show;
+    show();
+  <\/script>
+</body></html>
+`,
+      "Multiple-choice quiz": `<!DOCTYPE html>
+<html><head><style>
+  body { margin:0; font-family:sans-serif; background:#002C3E; color:#F7F8F3; display:flex;
+         align-items:center; justify-content:center; height:100vh; }
+  .card { background:#001a26; padding:26px; border-radius:12px; width:320px; }
+  .opt { display:block; width:100%; text-align:left; padding:10px; margin:8px 0; border-radius:6px;
+         border:1px solid #333; background:#002C3E; color:#F7F8F3; cursor:pointer; }
+  .opt.correct { background:#3ddc84; color:#002C3E; }
+  .opt.wrong { background:#F7444E; }
+  #score { margin-top:14px; color:#78BCC4; }
+</style></head>
+<body>
+  <div class="card">
+    <h3 id="question"></h3>
+    <div id="options"></div>
+    <div id="score"></div>
+  </div>
+  <script>
+    const questions = [
+      { q: 'Which keyword declares a constant in JavaScript?', opts: ['var', 'let', 'const', 'static'], a: 2 },
+      { q: 'What does HTML stand for?', opts: ['Hyper Text Markup Language', 'High Transfer Markup Logic', 'Home Tool Markup Language', 'Hyperlink Markdown Language'], a: 0 },
+      { q: 'Which language compiles to a binary with gcc?', opts: ['Python', 'C', 'JavaScript', 'Dart'], a: 1 },
+    ];
+    let idx = 0, score = 0;
+
+    function render() {
+      if (idx >= questions.length) {
+        document.getElementById('question').textContent = 'Quiz complete!';
+        document.getElementById('options').innerHTML = '';
+        document.getElementById('score').textContent = 'Final score: ' + score + '/' + questions.length;
+        return;
+      }
+      const q = questions[idx];
+      document.getElementById('question').textContent = (idx + 1) + '. ' + q.q;
+      const optsEl = document.getElementById('options');
+      optsEl.innerHTML = '';
+      q.opts.forEach((opt, i) => {
+        const btn = document.createElement('button');
+        btn.className = 'opt';
+        btn.textContent = opt;
+        btn.onclick = () => {
+          [...optsEl.children].forEach(b => b.disabled = true);
+          if (i === q.a) { btn.classList.add('correct'); score++; }
+          else {
+            btn.classList.add('wrong');
+            optsEl.children[q.a].classList.add('correct');
+          }
+          document.getElementById('score').textContent = 'Score so far: ' + score + '/' + (idx + 1);
+          setTimeout(() => { idx++; render(); }, 1200);
+        };
+        optsEl.appendChild(btn);
+      });
+    }
+    render();
+  <\/script>
+</body></html>
+`,
+      "Drag and drop board": `<!DOCTYPE html>
+<html><head><style>
+  body { margin:0; font-family:sans-serif; background:#F7F8F3; color:#002C3E; padding:30px; }
+  .board { display:flex; gap:20px; max-width:500px; margin:0 auto; }
+  .col { flex:1; background:#fff; border-radius:8px; padding:10px; min-height:200px; box-shadow:0 1px 4px rgba(0,0,0,0.1); }
+  .col h3 { font-size:0.9em; text-align:center; color:#78BCC4; }
+  .card { background:#002C3E; color:#fff; padding:10px; margin:6px 0; border-radius:6px; cursor:grab; }
+  .col.over { background:#eef7f8; }
+</style></head>
+<body>
+  <h2 style="text-align:center">Drag tasks between columns</h2>
+  <div class="board" id="board"></div>
+  <script>
+    const columns = ['To do', 'In progress', 'Done'];
+    const items = ['Design UI', 'Write tests', 'Fix bug #42'];
+    const board = document.getElementById('board');
+    const cols = columns.map((name) => {
+      const col = document.createElement('div');
+      col.className = 'col';
+      col.innerHTML = '<h3>' + name + '</h3>';
+      col.ondragover = (e) => { e.preventDefault(); col.classList.add('over'); };
+      col.ondragleave = () => col.classList.remove('over');
+      col.ondrop = (e) => {
+        e.preventDefault();
+        col.classList.remove('over');
+        const id = e.dataTransfer.getData('text/plain');
+        const card = document.getElementById(id);
+        if (card) col.appendChild(card);
+      };
+      board.appendChild(col);
+      return col;
+    });
+    items.forEach((text, i) => {
+      const card = document.createElement('div');
+      card.className = 'card';
+      card.id = 'card' + i;
+      card.textContent = text;
+      card.draggable = true;
+      card.ondragstart = (e) => e.dataTransfer.setData('text/plain', card.id);
+      cols[0].appendChild(card);
+    });
+  <\/script>
+</body></html>
+`,
+      "Animated progress bar": `<!DOCTYPE html>
+<html><head><style>
+  body { margin:0; height:100vh; display:flex; align-items:center; justify-content:center;
+         background:#002C3E; font-family:sans-serif; color:#F7F8F3; }
+  .box { width:300px; text-align:center; }
+  .track { background:#001a26; border-radius:10px; height:20px; overflow:hidden; margin-top:10px; }
+  .fill { height:100%; width:0%; background:linear-gradient(90deg,#78BCC4,#3ddc84); transition:width 0.3s; }
+  button { margin-top:16px; padding:8px 16px; background:#F7444E; color:#fff; border:none; border-radius:6px; cursor:pointer; }
+</style></head>
+<body>
+  <div class="box">
+    <div id="label">Uploading... 0%</div>
+    <div class="track"><div class="fill" id="fill"></div></div>
+    <button id="start">Start upload</button>
+  </div>
+  <script>
+    const fill = document.getElementById('fill');
+    const label = document.getElementById('label');
+    let progress = 0;
+    let timer = null;
+
+    document.getElementById('start').onclick = () => {
+      progress = 0;
+      clearInterval(timer);
+      timer = setInterval(() => {
+        progress += Math.random() * 15;
+        if (progress >= 100) {
+          progress = 100;
+          clearInterval(timer);
+          label.textContent = 'Upload complete!';
+        } else {
+          label.textContent = 'Uploading... ' + Math.floor(progress) + '%';
+        }
+        fill.style.width = progress + '%';
+      }, 300);
+    };
+  <\/script>
+</body></html>
+`,
+      "Confirmation modal": `<!DOCTYPE html>
+<html><head><style>
+  body { margin:0; height:100vh; display:flex; align-items:center; justify-content:center;
+         background:#F7F8F3; font-family:sans-serif; }
+  button { padding:10px 20px; background:#002C3E; color:#fff; border:none; border-radius:6px; cursor:pointer; }
+  .overlay { position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.5);
+             display:none; align-items:center; justify-content:center; }
+  .overlay.show { display:flex; }
+  .modal { background:#fff; padding:24px; border-radius:10px; width:280px; text-align:center; }
+  .modal button.confirm { background:#F7444E; margin-top:14px; margin-right:8px; }
+  .modal button.cancel { background:#78BCC4; color:#002C3E; }
+</style></head>
+<body>
+  <button id="open">Delete account</button>
+  <div class="overlay" id="overlay">
+    <div class="modal">
+      <h3>Are you sure?</h3>
+      <p>This action cannot be undone.</p>
+      <button class="confirm" id="confirm">Yes, delete</button>
+      <button class="cancel" id="cancel">Cancel</button>
+    </div>
+  </div>
+  <script>
+    const overlay = document.getElementById('overlay');
+    document.getElementById('open').onclick = () => overlay.classList.add('show');
+    document.getElementById('cancel').onclick = () => overlay.classList.remove('show');
+    document.getElementById('confirm').onclick = () => {
+      overlay.classList.remove('show');
+      document.getElementById('open').textContent = 'Account deleted (demo)';
+      document.getElementById('open').disabled = true;
+    };
+  <\/script>
+</body></html>
+`,
+      "Password generator": `<!DOCTYPE html>
+<html><head><style>
+  body { margin:0; height:100vh; display:flex; align-items:center; justify-content:center;
+         background:#002C3E; font-family:monospace; color:#F7F8F3; }
+  .box { text-align:center; }
+  #pw { font-size:1.4em; background:#001a26; padding:12px 18px; border-radius:6px; letter-spacing:2px; }
+  .controls { margin-top:16px; font-family:sans-serif; }
+  label { display:block; margin:6px 0; font-size:0.9em; }
+  button { margin-top:10px; padding:8px 16px; background:#F7444E; color:#fff; border:none; border-radius:6px; cursor:pointer; }
+</style></head>
+<body>
+  <div class="box">
+    <div id="pw">--------</div>
+    <div class="controls">
+      <label><input type="checkbox" id="upper" checked> Uppercase</label>
+      <label><input type="checkbox" id="numbers" checked> Numbers</label>
+      <label><input type="checkbox" id="symbols" checked> Symbols</label>
+      <label>Length: <input type="range" id="len" min="6" max="24" value="12"> <span id="lenLabel">12</span></label>
+      <button id="gen">Generate</button>
+    </div>
+  </div>
+  <script>
+    const lower = 'abcdefghijklmnopqrstuvwxyz';
+    const upper = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ';
+    const nums = '0123456789';
+    const syms = '!@#$%^&*()_-+=';
+
+    const lenInput = document.getElementById('len');
+    const lenLabel = document.getElementById('lenLabel');
+    lenInput.oninput = () => lenLabel.textContent = lenInput.value;
+
+    function generate() {
+      let pool = lower;
+      if (document.getElementById('upper').checked) pool += upper;
+      if (document.getElementById('numbers').checked) pool += nums;
+      if (document.getElementById('symbols').checked) pool += syms;
+      const length = +lenInput.value;
+      let pw = '';
+      for (let i = 0; i < length; i++) {
+        pw += pool[Math.floor(Math.random() * pool.length)];
+      }
+      document.getElementById('pw').textContent = pw;
+    }
+    document.getElementById('gen').onclick = generate;
+    generate();
+  <\/script>
+</body></html>
+`,
+      "Expense tracker": `<!DOCTYPE html>
+<html><head><style>
+  body { margin:0; font-family:sans-serif; background:#F7F8F3; color:#002C3E; padding:20px; }
+  .wrap { max-width:360px; margin:0 auto; }
+  .row { display:flex; gap:6px; margin-bottom:10px; }
+  input { flex:1; padding:8px; border:1px solid #ccc; border-radius:6px; }
+  button { padding:8px 14px; background:#F7444E; color:#fff; border:none; border-radius:6px; cursor:pointer; }
+  ul { list-style:none; padding:0; }
+  li { display:flex; justify-content:space-between; background:#fff; padding:8px 12px; margin:6px 0;
+       border-radius:6px; box-shadow:0 1px 3px rgba(0,0,0,0.1); }
+  li .neg { color:#F7444E; }
+  .total { font-size:1.3em; font-weight:bold; margin-top:14px; text-align:right; }
+  .del { background:#78BCC4; color:#002C3E; border:none; border-radius:4px; padding:2px 8px; cursor:pointer; }
+</style></head>
+<body>
+  <div class="wrap">
+    <h2>Expense Tracker</h2>
+    <div class="row">
+      <input id="desc" placeholder="Description">
+      <input id="amount" type="number" placeholder="Amount" style="flex:0 0 90px;">
+    </div>
+    <button id="add" style="width:100%;">Add entry</button>
+    <ul id="list"></ul>
+    <div class="total" id="total"></div>
+  </div>
+  <script>
+    let entries = [
+      { desc: 'Paycheck', amount: 500 },
+      { desc: 'Groceries', amount: -45 },
+      { desc: 'Internet bill', amount: -30 },
+    ];
+    const list = document.getElementById('list');
+    const total = document.getElementById('total');
+
+    function render() {
+      list.innerHTML = '';
+      entries.forEach((e, i) => {
+        const li = document.createElement('li');
+        const span = document.createElement('span');
+        span.textContent = e.desc;
+        const amt = document.createElement('span');
+        amt.className = e.amount < 0 ? 'neg' : '';
+        amt.textContent = (e.amount < 0 ? '' : '+') + e.amount.toFixed(2);
+        const del = document.createElement('button');
+        del.className = 'del';
+        del.textContent = 'x';
+        del.onclick = () => { entries.splice(i, 1); render(); };
+        li.appendChild(span);
+        li.appendChild(amt);
+        li.appendChild(del);
+        list.appendChild(li);
+      });
+      const sum = entries.reduce((s, e) => s + e.amount, 0);
+      total.textContent = 'Balance: ' + sum.toFixed(2);
+    }
+
+    document.getElementById('add').onclick = () => {
+      const desc = document.getElementById('desc').value.trim();
+      const amount = parseFloat(document.getElementById('amount').value);
+      if (desc && !isNaN(amount)) {
+        entries.push({ desc, amount });
+        document.getElementById('desc').value = '';
+        document.getElementById('amount').value = '';
+        render();
+      }
+    };
+    render();
+  <\/script>
+</body></html>
+`,
+    },
+  };
+
+  let editor;
+  require.config({ paths: { vs: "https://unpkg.com/monaco-editor@0.48.0/min/vs" } });
+  require(["vs/editor/editor.main"], () => {
+    editor = monaco.editor.create(document.getElementById("editor"), {
+      value: DEFAULT_SNIPPETS.python,
+      language: "python",
+      theme: "vs-dark",
+      automaticLayout: true,
+      fontSize: 14,
+      minimap: { enabled: false },
+    });
+    populateExamples("python"); // initial language on load
+
+    // TIER 5: if the URL has ?id=..., load that saved snippet on open.
+    const params = new URLSearchParams(window.location.search);
+    const loadId = params.get("id");
+    if (loadId) {
+      fetch(`/load/${loadId}`)
+        .then((r) => (r.ok ? r.json() : Promise.reject()))
+        .then((snippet) => {
+          languageSelect.value = snippet.language;
+          const monacoLang = snippet.language === "node" ? "javascript" : snippet.language === "web" ? "html" : snippet.language;
+          monaco.editor.setModelLanguage(editor.getModel(), monacoLang);
+          editor.setValue(snippet.code);
+        })
+        .catch(() => {
+          runMetaEl.textContent = "Couldn't load that saved snippet (bad or expired id).";
+        });
+    }
+  });
+
+  const languageSelect = document.getElementById("language");
+  const examplesSelect = document.getElementById("examples");
+
+  function populateExamples(lang) {
+    examplesSelect.innerHTML = '<option value="">Examples…</option>';
+    const examples = EXAMPLES[lang] || {};
+    for (const name of Object.keys(examples)) {
+      const opt = document.createElement("option");
+      opt.value = name;
+      opt.textContent = name;
+      examplesSelect.appendChild(opt);
+    }
+  }
+
+  examplesSelect.addEventListener("change", () => {
+    const lang = languageSelect.value;
+    const snippet = EXAMPLES[lang] && EXAMPLES[lang][examplesSelect.value];
+    if (snippet) editor.setValue(snippet);
+  });
+
+  languageSelect.addEventListener("change", () => {
+    const lang = languageSelect.value;
+    const monacoLang = lang === "node" ? "javascript" : lang === "web" ? "html" : lang; // dart/python/c map directly
+    monaco.editor.setModelLanguage(editor.getModel(), monacoLang);
+    if (!editor.getValue().trim()) {
+      editor.setValue(DEFAULT_SNIPPETS[lang]);
+    }
+    populateExamples(lang);
+  });
+
+  const runBtn = document.getElementById("runBtn");
+  const saveBtn = document.getElementById("saveBtn");
+  const outputEl = document.getElementById("output");
+  const runMetaEl = document.getElementById("runMeta");
+  const stdinEl = document.getElementById("stdinInput");
+
+  // Draggable splitter: lets people maximize whichever panel (editor or
+  // output) they're focused on, instead of a fixed 60/40 split.
+  (function setupSplitter() {
+    const splitter = document.getElementById("splitter");
+    const outputPanel = document.getElementById("output-panel");
+    const mainEl = document.querySelector("main");
+    let dragging = false;
+
+    const saved = localStorage.getItem("sandboxOutputWidthPct");
+    if (saved) {
+      outputPanel.style.width = saved + "%";
+    }
+
+    splitter.addEventListener("mousedown", (e) => {
+      dragging = true;
+      splitter.classList.add("dragging");
+      document.body.style.userSelect = "none";
+      e.preventDefault();
+    });
+
+    window.addEventListener("mousemove", (e) => {
+      if (!dragging) return;
+      const rect = mainEl.getBoundingClientRect();
+      let pct = ((rect.right - e.clientX) / rect.width) * 100;
+      pct = Math.min(80, Math.max(15, pct));
+      outputPanel.style.width = pct + "%";
+      if (editor) editor.layout();
+    });
+
+    window.addEventListener("mouseup", () => {
+      if (!dragging) return;
+      dragging = false;
+      splitter.classList.remove("dragging");
+      document.body.style.userSelect = "";
+      const pct = parseFloat(outputPanel.style.width);
+      if (!isNaN(pct)) localStorage.setItem("sandboxOutputWidthPct", pct.toFixed(1));
+      if (editor) editor.layout();
+    });
+  })();
+
+  saveBtn.addEventListener("click", async () => {
+    const name = window.prompt("Name this project:", "Untitled project");
+    if (name === null) return; // user hit Cancel
+
+    saveBtn.disabled = true;
+    const originalText = saveBtn.textContent;
+    saveBtn.textContent = "Saving…";
+    try {
+      const res = await fetch("/save", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ language: languageSelect.value, code: editor.getValue(), name }),
+      });
+      const data = await res.json();
+      if (data.id) {
+        const url = `${window.location.origin}${window.location.pathname}?id=${data.id}`;
+        // Update the address bar so refreshing keeps this snippet, and copy
+        // the shareable link to the clipboard as a convenience.
+        window.history.replaceState({}, "", `?id=${data.id}`);
+        try {
+          await navigator.clipboard.writeText(url);
+          runMetaEl.textContent = `Saved. Link copied to clipboard: ${url}`;
+        } catch (_) {
+          runMetaEl.textContent = `Saved. Link: ${url}`;
+        }
+      } else {
+        runMetaEl.textContent = "Save failed — see server logs.";
+      }
+    } catch (err) {
+      runMetaEl.textContent = `Save failed: ${String(err)}`;
+    } finally {
+      saveBtn.disabled = false;
+      saveBtn.textContent = originalText;
+    }
+  });
+
+  // "New" clears the editor back to a fresh default snippet for whatever
+  // language is currently selected, after confirming if there's real work
+  // in progress so a stray click can't silently wipe something unsaved.
+  const newBtn = document.getElementById("newBtn");
+  newBtn.addEventListener("click", () => {
+    const current = editor.getValue().trim();
+    const isDefault = Object.values(DEFAULT_SNIPPETS).some((s) => s.trim() === current);
+    if (current && !isDefault) {
+      const proceed = window.confirm("This will clear your current code. Save it first if you want to keep it. Continue?");
+      if (!proceed) return;
+    }
+    editor.setValue(DEFAULT_SNIPPETS[languageSelect.value] || "");
+    examplesSelect.value = "";
+    window.history.replaceState({}, "", window.location.pathname);
+    runMetaEl.textContent = "";
+    outputEl.innerHTML = "Run something to see output here.";
+  });
+
+  // "Open" shows a picker of everything saved via the Save button, pulled
+  // live from the server rather than requiring people to remember or paste
+  // a raw link.
+  const openBtn = document.getElementById("openBtn");
+  const projectsOverlay = document.getElementById("projectsOverlay");
+  const projectsList = document.getElementById("projectsList");
+  const projectsClose = document.getElementById("projectsClose");
+  const projectsClearAll = document.getElementById("projectsClearAll");
+
+  async function loadProjectsList() {
+    projectsList.innerHTML = "Loading…";
+    try {
+      const res = await fetch("/projects");
+      const projects = await res.json();
+      if (!Array.isArray(projects) || projects.length === 0) {
+        projectsList.innerHTML = '<div class="project-empty">No saved projects yet. Use Save to create one.</div>';
+        return;
+      }
+      projectsList.innerHTML = "";
+      for (const p of projects) {
+        const row = document.createElement("div");
+        row.className = "project-row";
+        const when = p.savedAt ? new Date(p.savedAt).toLocaleString() : "";
+        row.innerHTML = `<span class="row-main"><span>${escapeHtml(p.name || "Previous run")}</span><span class="meta">${escapeHtml(p.language)} · ${escapeHtml(when)}</span></span><button class="delete-btn" title="Delete this project">🗑</button>`;
+        row.addEventListener("click", async () => {
+          try {
+            const r = await fetch(`/load/${p.id}`);
+            if (!r.ok) throw new Error("not found");
+            const snippet = await r.json();
+            languageSelect.value = snippet.language;
+            const monacoLang = snippet.language === "node" ? "javascript" : snippet.language === "web" ? "html" : snippet.language;
+            monaco.editor.setModelLanguage(editor.getModel(), monacoLang);
+            editor.setValue(snippet.code);
+            populateExamples(snippet.language);
+            window.history.replaceState({}, "", `?id=${p.id}`);
+            projectsOverlay.classList.remove("show");
+          } catch (_) {
+            runMetaEl.textContent = "Couldn't load that project.";
+          }
+        });
+        row.querySelector(".delete-btn").addEventListener("click", async (e) => {
+          e.stopPropagation();
+          if (!window.confirm(`Delete "${p.name || "Previous run"}"? This can't be undone.`)) return;
+          try {
+            await fetch(`/projects/${p.id}`, { method: "DELETE" });
+            loadProjectsList();
+          } catch (_) {
+            runMetaEl.textContent = "Couldn't delete that project.";
+          }
+        });
+        projectsList.appendChild(row);
+      }
+    } catch (_) {
+      projectsList.innerHTML = '<div class="project-empty">Couldn\'t reach the server to list projects.</div>';
+    }
+  }
+
+  openBtn.addEventListener("click", () => {
+    projectsOverlay.classList.add("show");
+    loadProjectsList();
+  });
+  projectsClose.addEventListener("click", () => projectsOverlay.classList.remove("show"));
+  projectsOverlay.addEventListener("click", (e) => {
+    if (e.target === projectsOverlay) projectsOverlay.classList.remove("show");
+  });
+  projectsClearAll.addEventListener("click", async () => {
+    if (!window.confirm("Delete ALL saved projects? This can't be undone.")) return;
+    try {
+      await fetch("/projects", { method: "DELETE" });
+      loadProjectsList();
+    } catch (_) {
+      runMetaEl.textContent = "Couldn't clear projects.";
+    }
+  });
+
+  // "Import" loads a local code file straight into the editor, client-side
+  // only -- no server round trip, no project created. The file's extension
+  // picks the language automatically where it maps cleanly.
+  //
+  // Selecting MULTIPLE files is a lightweight stand-in for "import a
+  // folder": each file is saved as its own project (via the existing
+  // /save endpoint) rather than merged into one multi-file project, since
+  // the editor and storage are both single-file. Open the picker
+  // afterwards to switch between the imported files.
+  const importBtn = document.getElementById("importBtn");
+  const importFile = document.getElementById("importFile");
+  const EXT_TO_LANG = {
+    py: "python", js: "node", dart: "dart", go: "go", c: "c", cpp: "cpp", ts: "typescript", html: "web",
+  };
+  importBtn.addEventListener("click", () => importFile.click());
+  importFile.addEventListener("change", async () => {
+    const files = importFile.files ? Array.from(importFile.files) : [];
+    if (files.length === 0) return;
+
+    if (files.length === 1) {
+      const file = files[0];
+      const text = await file.text();
+      const ext = file.name.split(".").pop().toLowerCase();
+      const lang = EXT_TO_LANG[ext];
+      if (lang) {
+        languageSelect.value = lang;
+        const monacoLang = lang === "node" ? "javascript" : lang === "web" ? "html" : lang;
+        monaco.editor.setModelLanguage(editor.getModel(), monacoLang);
+        populateExamples(lang);
+      }
+      editor.setValue(text);
+      examplesSelect.value = "";
+      window.history.replaceState({}, "", window.location.pathname);
+      runMetaEl.textContent = lang
+        ? `Imported ${file.name}`
+        : `Imported ${file.name} (unrecognized extension — kept current language)`;
+      importFile.value = "";
+      return;
+    }
+
+    // Multiple files: save each as its own project instead of guessing
+    // which one should land in the editor.
+    runMetaEl.textContent = `Importing ${files.length} files…`;
+    let imported = 0;
+    let skipped = 0;
+    for (const file of files) {
+      const ext = file.name.split(".").pop().toLowerCase();
+      const lang = EXT_TO_LANG[ext];
+      if (!lang) {
+        skipped++;
+        continue;
+      }
+      try {
+        const text = await file.text();
+        const res = await fetch("/save", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ language: lang, code: text, name: file.name }),
+        });
+        if (res.ok) imported++;
+        else skipped++;
+      } catch (_) {
+        skipped++;
+      }
+    }
+    runMetaEl.textContent = skipped > 0
+      ? `Imported ${imported} file(s) as projects, skipped ${skipped} (unrecognized extension or save failed). Open them via 📂 Open.`
+      : `Imported ${imported} file(s) as projects. Open them via 📂 Open.`;
+    importFile.value = "";
+  });
+
+  runBtn.addEventListener("click", async () => {
+    const code = editor.getValue();
+    const language = languageSelect.value;
+    const stdin = stdinEl.value;
+
+    runBtn.disabled = true;
+    runBtn.textContent = "Running…";
+    outputEl.innerHTML = "";
+    runMetaEl.textContent = "";
+
+    // "Web" is a client-side-only language: it's rendered directly in the
+    // browser, not executed in a Docker container, so there's no sandbox
+    // to run it in and nothing to send to the server. The iframe still
+    // isolates it from the rest of this page the same way visual examples
+    // from other languages are rendered.
+    if (language === "web") {
+      const iframe = document.createElement("iframe");
+      iframe.setAttribute("sandbox", "allow-scripts");
+      iframe.style.width = "100%";
+      iframe.style.height = "400px";
+      iframe.style.border = "1px solid rgba(0,44,62,0.15)";
+      iframe.style.borderRadius = "6px";
+      iframe.style.background = "#fff";
+      iframe.srcdoc = code;
+      outputEl.appendChild(iframe);
+      runMetaEl.textContent = "Rendered directly in your browser (no container used)";
+      runBtn.disabled = false;
+      runBtn.textContent = "▶ Run";
+      return;
+    }
+
+    try {
+      const res = await fetch("/run", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ language, code, stdin }),
+      });
+      const data = await res.json();
+
+      if (data.error) {
+        outputEl.innerHTML = `<span class="stderr">${escapeHtml(data.error)}</span>`;
+      } else {
+        // If the program's own output IS a complete HTML document, render
+        // it live instead of showing it as escaped text -- this is how
+        // "visual" examples (a moving car, fireworks, a login page) work:
+        // the sandboxed code prints real HTML/CSS/JS, and the browser
+        // renders it here, safely isolated in a sandboxed iframe (no
+        // same-origin access to this page, so it can't read anything of
+        // yours even if the printed code were malicious).
+        const trimmedOutput = (data.output || "").trim();
+        const looksLikeHtmlDoc = /^<!DOCTYPE html>|^<html[\s>]/i.test(trimmedOutput);
+
+        if (looksLikeHtmlDoc && !data.errorOutput && !data.timedOut) {
+          outputEl.innerHTML = "";
+          const iframe = document.createElement("iframe");
+          iframe.setAttribute("sandbox", "allow-scripts");
+          iframe.style.width = "100%";
+          iframe.style.height = "400px";
+          iframe.style.border = "1px solid rgba(0,44,62,0.15)";
+          iframe.style.borderRadius = "6px";
+          iframe.style.background = "#fff";
+          iframe.srcdoc = data.output;
+          outputEl.appendChild(iframe);
+        } else {
+          let html = "";
+          if (data.output) html += escapeHtml(data.output);
+          if (data.errorOutput) html += `<span class="stderr">${escapeHtml(data.errorOutput)}</span>`;
+          if (data.timedOut) html += `\n<span class="stderr">⚠ Run exceeded the time limit and was stopped.</span>`;
+          if (!html) html = "(no output)";
+          outputEl.innerHTML = html;
+        }
+        if (data.note) {
+          const noteDiv = document.createElement("div");
+          noteDiv.className = "note";
+          noteDiv.textContent = data.note;
+          outputEl.appendChild(noteDiv);
+        }
+
+        // TIER 4: observability — surface what actually happened, not just output text.
+        const metaParts = [];
+        if (typeof data.durationMs === "number") metaParts.push(`${data.durationMs}ms`);
+        if (data.exitCode !== null && data.exitCode !== undefined) metaParts.push(`exit code ${data.exitCode}`);
+        if (data.profile) metaParts.push(`${data.profile} profile`);
+        if (data.viaPool) metaParts.push("warm pool");
+        runMetaEl.textContent = metaParts.join(" · ");
+      }
+    } catch (err) {
+      outputEl.innerHTML = `<span class="stderr">Failed to reach the sandbox server: ${escapeHtml(String(err))}</span>`;
+    } finally {
+      runBtn.disabled = false;
+      runBtn.textContent = "▶ Run";
+    }
+  });
+
+  function escapeHtml(str) {
+    return str
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;");
+  }
+</script>
+
+</body>
+</html>
